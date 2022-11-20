@@ -20,7 +20,6 @@ import (
 	"github.com/alrusov/log"
 	"github.com/alrusov/misc"
 	"github.com/alrusov/panic"
-	"github.com/alrusov/stdhttp"
 )
 
 //----------------------------------------------------------------------------------------------------------------------------//
@@ -109,7 +108,7 @@ func init() {
 }
 
 // Инициализация
-func initModule(appCfg any, h *stdhttp.HTTP) (err error) {
+func initModule(appCfg any, h any) (err error) {
 	if knownCfg != nil {
 		err = knownCfg.ConnectAll()
 		if err != nil {
