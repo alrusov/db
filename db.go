@@ -529,6 +529,12 @@ func (db *DB) Query(idx int, dest any, queryName string, fields []string, vars [
 
 	q = fillFields(q, PatternTypeSelect, 0, fields)
 
+	return db.query(conn, dest, q, preparedVars)
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+func (db *DB) query(conn *sqlx.DB, dest any, q string, preparedVars []any) (err error) {
 	switch dest := dest.(type) {
 	default:
 		if k := reflect.Indirect(reflect.ValueOf(dest)).Kind(); k == reflect.Slice {
@@ -584,7 +590,6 @@ func (db *DB) Query(idx int, dest any, queryName string, fields []string, vars [
 		*dest = result
 		return
 	}
-
 }
 
 func Query(dbName string, idx int, dest any, queryName string, fields []string, vars []any) (err error) {
@@ -598,7 +603,7 @@ func Query(dbName string, idx int, dest any, queryName string, fields []string, 
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) ExecEx(idx int, queryName string, tp PatternType, startIdx int, fields []string, vars []any) (result sql.Result, err error) {
+func (db *DB) ExecEx(idx int, dest any, queryName string, tp PatternType, startIdx int, fields []string, vars []any) (result sql.Result, err error) {
 	t0 := misc.NowUnixNano()
 
 	defer func() {
@@ -627,7 +632,12 @@ func (db *DB) ExecEx(idx int, queryName string, tp PatternType, startIdx int, fi
 
 	q = fillFields(q, tp, startIdx, fields)
 
-	result, err = conn.Exec(q, preparedVars...)
+	if dest == nil || reflect.ValueOf(dest).IsNil() {
+		result, err = conn.Exec(q, preparedVars...)
+	} else {
+		err = db.query(conn, dest, q, preparedVars)
+		result = nil
+	}
 	if err != nil {
 		return
 	}
@@ -635,21 +645,21 @@ func (db *DB) ExecEx(idx int, queryName string, tp PatternType, startIdx int, fi
 	return
 }
 
-func ExecEx(dbName string, idx int, queryName string, tp PatternType, startIdx int, fields []string, vars []any) (result sql.Result, err error) {
+func ExecEx(dbName string, idx int, dest any, queryName string, tp PatternType, startIdx int, fields []string, vars []any) (result sql.Result, err error) {
 	db, err := GetDB(dbName)
 	if err != nil {
 		return
 	}
 
-	return db.ExecEx(idx, queryName, tp, startIdx, fields, vars)
+	return db.ExecEx(idx, dest, queryName, tp, startIdx, fields, vars)
 }
 
 func (db *DB) Exec(idx int, queryName string, vars []any) (result sql.Result, err error) {
-	return db.ExecEx(idx, queryName, PatternTypeNone, 0, nil, vars)
+	return db.ExecEx(idx, nil, queryName, PatternTypeNone, 0, nil, vars)
 }
 
 func Exec(dbName string, idx int, queryName string, vars []any) (result sql.Result, err error) {
-	return ExecEx(dbName, idx, queryName, PatternTypeNone, 0, nil, vars)
+	return ExecEx(dbName, idx, nil, queryName, PatternTypeNone, 0, nil, vars)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
