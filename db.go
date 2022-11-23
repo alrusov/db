@@ -523,6 +523,10 @@ func (db *DB) Query(idx int, dest any, queryName string, fields []string, vars [
 		return
 	}
 
+	if len(fields) == 0 {
+		fields = []string{"*"}
+	}
+
 	q = fillFields(q, PatternTypeSelect, 0, fields)
 
 	switch dest := dest.(type) {

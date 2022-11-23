@@ -3,7 +3,7 @@ module github.com/alrusov/db
 go 1.19
 
 require (
-	github.com/alrusov/config v0.1.47
+	github.com/alrusov/config v0.1.48
 	github.com/alrusov/initializer v0.1.1
 	github.com/alrusov/jsonw v0.1.3
 	github.com/alrusov/loadavg v0.1.5
