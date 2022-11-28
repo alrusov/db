@@ -68,15 +68,20 @@ type (
 	}
 
 	SubstArg struct {
-		Name  string
-		Value any
+		name  string
+		value any
 	}
 )
 
 const (
-	PatternNames = "@NAMES@"
-	PatternVals  = "@VALS@"
-	PatternPairs = "@PAIRS@"
+	JbFields = "JB"
+
+	PatternNames         = "@NAMES@"
+	PatternNamesPreComma = "@NAMES_PRE_COMMA@"
+	PatternVals          = "@VALS@"
+	PatternValsPreComma  = "@VALS_PRE_COMMA@"
+	PatternPairs         = "@PAIRS@"
+	PatternPairsPreComma = "@PAIRS_PRE_COMMA@"
 )
 
 const (
@@ -124,8 +129,8 @@ func initModule(appCfg any, h any) (err error) {
 
 func Subst(name string, value any) *SubstArg {
 	return &SubstArg{
-		Name:  name,
-		Value: value,
+		name:  name,
+		value: value,
 	}
 }
 
@@ -518,7 +523,7 @@ func (db *DB) Query(idx int, dest any, queryName string, fields []string, vars [
 		return
 	}
 
-	conn, preparedVars, q, err := db.prepareQuery(idx, queryName, vars)
+	conn, preparedVars, q, err := db.prepareQuery(idx, queryName, 0, vars)
 	if err != nil {
 		return
 	}
@@ -625,7 +630,7 @@ func (db *DB) ExecEx(idx int, dest any, queryName string, tp PatternType, startI
 		Log.MessageWithSource(log.TRACE2, logSrc, "%s %v", queryName, vars)
 	}
 
-	conn, preparedVars, q, err := db.prepareQuery(idx, queryName, vars)
+	conn, preparedVars, q, err := db.prepareQuery(idx, queryName, startIdx, vars)
 	if err != nil {
 		return
 	}
@@ -664,7 +669,7 @@ func Exec(dbName string, idx int, queryName string, vars []any) (result sql.Resu
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) prepareQuery(idx int, queryName string, vars []any) (conn *sqlx.DB, preparedVars []any, q string, err error) {
+func (db *DB) prepareQuery(idx int, queryName string, startIdx int, vars []any) (conn *sqlx.DB, preparedVars []any, q string, err error) {
 	q, err = db.GetQuery(queryName)
 	if err != nil {
 		return
@@ -722,13 +727,27 @@ func doSubst(q string, vars []any) (newQ string, newVars []any, err error) {
 			}
 
 			var s string
-			s, err = misc.Iface2String(v.Value)
-			if err != nil {
-				err = fmt.Errorf(`subst %v: %s`, v, err)
-				return
+
+			switch val := v.value.(type) {
+			default:
+				s, err = misc.Iface2String(val)
+				if err != nil {
+					err = fmt.Errorf(`subst %#v: %s`, v, err)
+					return
+				}
+
+			case JbBuildFormats:
+				ln := len(val)
+				vv := make([]string, ln)
+				for i := 0; i < ln; i++ {
+					f := val[i]
+					vv[i] = fmt.Sprintf(f.Format, f.Idx)
+				}
+
+				s = strings.Join(vv, ",")
 			}
 
-			newQ = strings.ReplaceAll(newQ, "@"+v.Name+"@", s)
+			newQ = strings.ReplaceAll(newQ, "@"+v.name+"@", s)
 		}
 	}
 
@@ -759,6 +778,13 @@ func fillFields(q string, tp PatternType, startIdx int, fields []string) string 
 		q = strings.ReplaceAll(q, PatternNames, f)
 		q = strings.ReplaceAll(q, PatternVals, v)
 
+		if len(f) > 0 {
+			f = "," + f
+			v = "," + v
+		}
+		q = strings.ReplaceAll(q, PatternNamesPreComma, f)
+		q = strings.ReplaceAll(q, PatternValsPreComma, v)
+
 	case PatternTypeUpdate:
 		vv := make([]string, nf)
 		for i := 0; i < nf; i++ {
@@ -767,6 +793,11 @@ func fillFields(q string, tp PatternType, startIdx int, fields []string) string 
 
 		v := strings.Join(vv, ",")
 		q = strings.ReplaceAll(q, PatternPairs, v)
+
+		if len(v) > 0 {
+			v = "," + v
+		}
+		q = strings.ReplaceAll(q, PatternPairsPreComma, v)
 	}
 
 	return q
@@ -774,7 +805,103 @@ func fillFields(q string, tp PatternType, startIdx int, fields []string) string 
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func FieldsList(o any) (list []string, err error) {
+type (
+	FieldsList struct {
+		all     []string
+		regular []string
+		jbFull  misc.StringMap // name -> type
+		jbShort misc.StringMap // name -> type
+	}
+
+	JbBuildFormats []*JbBuildFormat
+	JbBuildFormat  struct {
+		Idx    int
+		Format string
+	}
+)
+
+func (fields *FieldsList) All() []string {
+	return fields.all
+}
+
+func (fields *FieldsList) AllStr() string {
+	return strings.Join(fields.all, ",")
+}
+
+func (fields *FieldsList) Regular() []string {
+	return fields.regular
+}
+
+func (fields *FieldsList) RegularStr() string {
+	return strings.Join(fields.regular, ",")
+}
+
+func (fields *FieldsList) JbFull() misc.StringMap {
+	return fields.jbFull
+}
+
+func (fields *FieldsList) JbShort() misc.StringMap {
+	return fields.jbShort
+}
+
+func (fields *FieldsList) JbSelectStr() string {
+	ln := len(fields.jbShort)
+	if ln == 0 {
+		return ""
+	}
+
+	list := make([]string, 0, ln)
+
+	for k, v := range fields.jbShort {
+		s := fmt.Sprintf("%s %s", k, v)
+		list = append(list, s)
+	}
+
+	return strings.Join(list, ",")
+}
+
+func (fields *FieldsList) JbPrepareBuild(vars misc.InterfaceMap) (jb JbBuildFormats, names []string, vals []any) {
+	ln := len(fields.jbShort)
+	if ln == 0 {
+		return
+	}
+
+	jb = make(JbBuildFormats, 0, ln)
+	names = make([]string, 0, len(vars))
+	vals = make([]any, 0, len(vars))
+	jbVals := make([]any, 0, len(vars))
+
+	idx := 0
+
+	for name, val := range vars {
+		tp, exists := fields.jbFull[name]
+
+		n := strings.Split(name, ".")
+		if len(n) > 1 {
+			name = n[len(n)-1]
+		}
+
+		if !exists {
+			names = append(names, name)
+			vals = append(vals, val)
+			continue
+		}
+
+		jb = append(jb, &JbBuildFormat{
+			Idx:    idx,
+			Format: fmt.Sprintf("'%s',$%%d::%s", name, tp),
+		})
+		idx++
+		jbVals = append(jbVals, val)
+	}
+
+	vals = append(vals, jbVals...)
+	return
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+func MakeFieldsList(o any) (fields *FieldsList, err error) {
 	t := reflect.TypeOf(o)
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -786,21 +913,26 @@ func FieldsList(o any) (list []string, err error) {
 	}
 
 	n := t.NumField()
-	list = make([]string, 0, n)
+	fields = &FieldsList{
+		all:     make([]string, 0, n),
+		regular: make([]string, 0, n),
+		jbFull:  make(misc.StringMap, n),
+		jbShort: make(misc.StringMap, n),
+	}
 
 	for i := 0; i < n; i++ {
-		f := t.Field(i)
+		sf := t.Field(i)
 
-		if !f.IsExported() {
+		if !sf.IsExported() {
 			continue
 		}
 
-		t := f.Type
+		t := sf.Type
 		if t.Kind() == reflect.Pointer {
 			t = t.Elem()
 		}
 
-		name := misc.StructFieldName(&f, "db")
+		name := misc.StructFieldName(&sf, "db")
 
 		if name == "-" {
 			continue
@@ -810,13 +942,13 @@ func FieldsList(o any) (list []string, err error) {
 			field := name
 			as := name
 
-			defVal, ok := f.Tag.Lookup("default")
+			defVal, ok := sf.Tag.Lookup("default")
 			if ok {
 				v := reflect.New(t).Interface()
 				err = misc.Iface2IfacePtr(defVal, v)
 				if err == nil {
 					v = reflect.ValueOf(v).Elem().Interface()
-					if f.Type.Kind() == reflect.String {
+					if sf.Type.Kind() == reflect.String {
 						v = "'" + v.(string) + "'"
 					}
 					field = fmt.Sprintf("COALESCE(%s, %v)", name, v)
@@ -824,7 +956,26 @@ func FieldsList(o any) (list []string, err error) {
 			}
 
 			s := fmt.Sprintf(`%s AS "%s"`, field, as)
-			list = append(list, s)
+			fields.all = append(fields.all, s)
+
+			tags := misc.StructFieldOpts(&sf, "db")
+			tp, ok := tags["jb"]
+			if !ok {
+				fields.regular = append(fields.regular, s)
+			} else {
+				if tp == "" {
+					tp = dbTpOf(t.Kind())
+				}
+				if tp != "" {
+					fields.jbFull[name] = tp
+
+					n := strings.Split(name, ".")
+					if len(n) > 1 {
+						name = n[len(n)-1]
+					}
+					fields.jbShort[name] = tp
+				}
+			}
 			continue
 		}
 
@@ -832,15 +983,47 @@ func FieldsList(o any) (list []string, err error) {
 			continue
 		}
 
-		var subList []string
-		subList, err = FieldsList(reflect.New(t).Interface())
+		var subFields *FieldsList
+		subFields, err = MakeFieldsList(reflect.New(t).Interface())
 		if err != nil {
 			return
 		}
-		list = append(list, subList...)
+
+		fields.all = append(fields.all, subFields.all...)
+		fields.regular = append(fields.regular, subFields.regular...)
+
+		for k, v := range subFields.jbShort {
+			fields.jbShort[k] = v
+		}
+
+		for k, v := range subFields.jbFull {
+			fields.jbFull[k] = v
+		}
 	}
 
 	return
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+func dbTpOf(k reflect.Kind) string {
+	switch k {
+	default:
+		return ""
+
+	case reflect.Bool:
+		return "bool"
+
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "int"
+
+	case reflect.Float32, reflect.Float64:
+		return "float"
+
+	case reflect.String:
+		return "varchar"
+	}
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
