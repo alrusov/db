@@ -861,7 +861,7 @@ func (fields *FieldsList) JbSelectStr() string {
 }
 
 func (fields *FieldsList) JbPrepareBuild(vars misc.InterfaceMap) (jb JbBuildFormats, names []string, vals []any) {
-	ln := len(fields.jbShort)
+	ln := len(fields.all)
 	if ln == 0 {
 		return
 	}
