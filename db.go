@@ -74,7 +74,8 @@ type (
 )
 
 const (
-	JbFields = "JB"
+	SubstJbFields = "JB"
+	SubstExtra    = "EXTRA"
 
 	PatternNames         = "@NAMES@"
 	PatternNamesPreComma = "@NAMES_PRE_COMMA@"
@@ -82,6 +83,7 @@ const (
 	PatternValsPreComma  = "@VALS_PRE_COMMA@"
 	PatternPairs         = "@PAIRS@"
 	PatternPairsPreComma = "@PAIRS_PRE_COMMA@"
+	PatternExtra         = "@" + SubstExtra + "@"
 )
 
 const (
@@ -751,6 +753,8 @@ func doSubst(q string, vars []any) (newQ string, newVars []any, err error) {
 		}
 	}
 
+	newQ = strings.ReplaceAll(newQ, PatternExtra, "") // if not substituted before
+
 	return
 }
 
@@ -808,6 +812,7 @@ func fillFields(q string, tp PatternType, startIdx int, fields []string) string 
 type (
 	FieldsList struct {
 		all     []string
+		allSrc  []string
 		regular []string
 		jbFull  misc.StringMap // name -> type
 		jbShort misc.StringMap // name -> type
@@ -822,6 +827,10 @@ type (
 
 func (fields *FieldsList) All() []string {
 	return fields.all
+}
+
+func (fields *FieldsList) AllSrc() []string {
+	return fields.allSrc
 }
 
 func (fields *FieldsList) AllStr() string {
@@ -915,6 +924,7 @@ func MakeFieldsList(o any) (fields *FieldsList, err error) {
 	n := t.NumField()
 	fields = &FieldsList{
 		all:     make([]string, 0, n),
+		allSrc:  make([]string, 0, n),
 		regular: make([]string, 0, n),
 		jbFull:  make(misc.StringMap, n),
 		jbShort: make(misc.StringMap, n),
@@ -957,6 +967,7 @@ func MakeFieldsList(o any) (fields *FieldsList, err error) {
 
 			s := fmt.Sprintf(`%s AS "%s"`, field, as)
 			fields.all = append(fields.all, s)
+			fields.allSrc = append(fields.allSrc, name)
 
 			tags := misc.StructFieldOpts(&sf, "db")
 			tp, ok := tags["jb"]
