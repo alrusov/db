@@ -74,8 +74,9 @@ type (
 )
 
 const (
-	SubstJbFields = "JB"
-	SubstExtra    = "EXTRA"
+	SubstJbFields  = "JB"
+	SubstExtra     = "EXTRA"
+	SubstExtraFrom = "EXTRA_FROM"
 
 	PatternNames         = "@NAMES@"
 	PatternNamesPreComma = "@NAMES_PRE_COMMA@"
@@ -84,6 +85,7 @@ const (
 	PatternPairs         = "@PAIRS@"
 	PatternPairsPreComma = "@PAIRS_PRE_COMMA@"
 	PatternExtra         = "@" + SubstExtra + "@"
+	PatternExtraFrom     = "@" + SubstExtraFrom + "@"
 )
 
 const (
@@ -333,12 +335,6 @@ func (x *DB) Check(cfg any) (err error) {
 		msgs.Add("empty dsn")
 	}
 
-	for i, dsn := range x.DSN {
-		if dsn == "" {
-			msgs.Add("empty dsn[%d]", i)
-		}
-	}
-
 	return msgs.Error()
 }
 
@@ -349,7 +345,7 @@ func (db *DB) Connect(idx int) (conn *sqlx.DB, doRetry bool, err error) {
 	// отрицательный idx оставим на будущее, например выбор произвольной базы
 
 	if idx < 0 || idx >= int(len(db.DSN)) {
-		err = fmt.Errorf("%s: illegal db index %d, expected from 0 to %d", db.Name, idx, len(db.DSN))
+		err = fmt.Errorf("illegal db index %d, expected from 0 to %d", idx, len(db.DSN))
 		return
 	}
 
@@ -357,13 +353,11 @@ func (db *DB) Connect(idx int) (conn *sqlx.DB, doRetry bool, err error) {
 
 	conn, err = sqlx.Open(db.Driver, db.DSN[idx])
 	if err != nil {
-		err = fmt.Errorf("%s: %s", db.Name, err)
 		return
 	}
 
 	err = conn.Ping()
 	if err != nil {
-		err = fmt.Errorf("%s: %s", db.Name, err)
 		return
 	}
 
@@ -390,7 +384,7 @@ func (c Config) ConnectAll() (err error) {
 
 		for i := 0; i < len(db.DSN); i++ {
 			db := db
-			i := i
+			idx := i
 
 			go func() {
 				panicID := panic.ID()
@@ -398,10 +392,15 @@ func (c Config) ConnectAll() (err error) {
 
 				defer wg.Done()
 
+				if db.DSN[idx] == "" {
+					Log.Message(log.INFO, "[%s.%d] empty DSN, skipped", db.Name, idx)
+					return
+				}
+
 				for misc.AppStarted() {
-					conn, doRetry, err := db.Connect(i)
+					conn, doRetry, err := db.Connect(idx)
 					if err != nil {
-						Log.Message(log.WARNING, "%s", err)
+						Log.Message(log.WARNING, "[%s.%d] %s", db.Name, idx, err)
 						if !doRetry {
 							return
 						}
@@ -409,16 +408,15 @@ func (c Config) ConnectAll() (err error) {
 						continue
 					}
 
-					db.conn[i] = conn
-					dbName := db.Name
+					db.conn[idx] = conn
 
-					Log.Message(log.INFO, "[%s] database connection created", dbName)
+					Log.Message(log.INFO, "[%s.%d] database connection created", db.Name, idx)
 
 					misc.AddExitFunc(
-						fmt.Sprintf("db.%s[%d]", dbName, i),
+						fmt.Sprintf("db[%s.%d]", db.Name, idx),
 						func(_ int, _ any) {
 							conn.Close()
-							Log.Message(log.INFO, "[%s] database connection closed", dbName)
+							Log.Message(log.INFO, "[%s.%d] database connection closed", db.Name, idx)
 						},
 						nil,
 					)
@@ -483,7 +481,7 @@ func GetConn(dbName string, idx int) (conn *sqlx.DB, err error) {
 	conn = db.conn[idx]
 
 	if conn == nil {
-		err = fmt.Errorf("database %s not connected", dbName)
+		err = fmt.Errorf("database %s.%d is not connected", dbName, idx)
 		return
 
 	}
@@ -672,9 +670,13 @@ func Exec(dbName string, idx int, queryName string, vars []any) (result sql.Resu
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func (db *DB) prepareQuery(idx int, queryName string, startIdx int, vars []any) (conn *sqlx.DB, preparedVars []any, q string, err error) {
-	q, err = db.GetQuery(queryName)
-	if err != nil {
-		return
+	if queryName != "" && queryName[0] == '#' {
+		q = queryName[1:]
+	} else {
+		q, err = db.GetQuery(queryName)
+		if err != nil {
+			return
+		}
 	}
 
 	conn, err = GetConn(db.Name, idx)
@@ -753,7 +755,8 @@ func doSubst(q string, vars []any) (newQ string, newVars []any, err error) {
 		}
 	}
 
-	newQ = strings.ReplaceAll(newQ, PatternExtra, "") // if not substituted before
+	newQ = strings.ReplaceAll(newQ, PatternExtra, "")     // if not substituted before
+	newQ = strings.ReplaceAll(newQ, PatternExtraFrom, "") // if not substituted before
 
 	return
 }
