@@ -30,12 +30,12 @@ type (
 
 	// Описание базы
 	DB struct {
-		Name   string `toml:"-"`
-		Active bool   `toml:"active"`
-		Driver string `toml:"driver"`
-		DSN    string `toml:"dsn"`
-
-		Queries misc.StringMap `toml:"queries"` // SQL запросы для этой базы, ключ - имя запроса
+		Name           string         `toml:"-"`
+		Active         bool           `toml:"active"`
+		Driver         string         `toml:"driver"`
+		DSN            string         `toml:"dsn"`
+		UseQueriesFrom string         `toml:"use-queries-from"` // Use queries from another
+		Queries        misc.StringMap `toml:"queries"`          // SQL запросы для этой базы, ключ - имя запроса
 
 		conn *sqlx.DB
 	}
@@ -301,6 +301,15 @@ func (x *Config) Check(cfg any) (err error) {
 		err = df.Check(cfg)
 		if err != nil {
 			msgs.Add("db.%s: %s", name, err)
+		}
+
+		if df.UseQueriesFrom != "" {
+			c, exists := (*x)[df.UseQueriesFrom]
+			if !exists {
+				msgs.Add(`db.%s: queries source "%s" not found`, name, df.UseQueriesFrom)
+			} else {
+				df.Queries = c.Queries
+			}
 		}
 	}
 
