@@ -30,14 +30,14 @@ type (
 
 	// Описание базы
 	DB struct {
-		Name   string   `toml:"-"`
-		Active bool     `toml:"active"`
-		Driver string   `toml:"driver"`
-		DSN    []string `toml:"dsn"`
+		Name   string `toml:"-"`
+		Active bool   `toml:"active"`
+		Driver string `toml:"driver"`
+		DSN    string `toml:"dsn"`
 
 		Queries misc.StringMap `toml:"queries"` // SQL запросы для этой базы, ключ - имя запроса
 
-		conn []*sqlx.DB
+		conn *sqlx.DB
 	}
 
 	PatternType int
@@ -45,10 +45,8 @@ type (
 	Stat struct {
 		mutex  *sync.Mutex
 		period time.Duration
-		Stat   map[string]dbStat `json:"stat,omitempty"`
+		Stat   map[string]*connStat `json:"stat,omitempty"`
 	}
-
-	dbStat map[int]*connStat
 
 	connStat struct {
 		Query *funcStat `json:"query,omitempty"`
@@ -105,7 +103,7 @@ var (
 	stat = &Stat{
 		mutex:  new(sync.Mutex),
 		period: time.Second * 60,
-		Stat:   make(map[string]dbStat, 8),
+		Stat:   make(map[string]*connStat, 8),
 	}
 )
 
@@ -149,11 +147,9 @@ func GetStat() *Stat {
 	stat.mutex.Lock()
 	defer stat.mutex.Unlock()
 
-	for _, d := range stat.Stat {
-		for _, c := range d {
-			c.Query.update()
-			c.Exec.update()
-		}
+	for _, s := range stat.Stat {
+		s.Query.update()
+		s.Exec.update()
 	}
 	return stat.cloneVals()
 }
@@ -165,20 +161,16 @@ func (src *Stat) cloneVals() (dst *Stat) {
 	dst = &Stat{
 		mutex:  nil,
 		period: 0,
-		Stat:   make(map[string]dbStat, len(src.Stat)),
+		Stat:   make(map[string]*connStat, len(src.Stat)),
 	}
 
-	for name, srcDB := range src.Stat {
-		dstDB := make(dbStat, len(srcDB))
-		for idx, srcConn := range srcDB {
-			q := *srcConn.Query
-			e := *srcConn.Exec
-			dstDB[idx] = &connStat{
-				Query: &q,
-				Exec:  &e,
-			}
+	for name, srcConn := range src.Stat {
+		q := *srcConn.Query
+		e := *srcConn.Exec
+		dst.Stat[name] = &connStat{
+			Query: &q,
+			Exec:  &e,
 		}
-		dst.Stat[name] = dstDB
 	}
 
 	return
@@ -186,23 +178,17 @@ func (src *Stat) cloneVals() (dst *Stat) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func newStat(name string, idx int) (err error) {
+func newStat(name string) (err error) {
 	stat.mutex.Lock()
 	defer stat.mutex.Unlock()
 
-	db, exists := stat.Stat[name]
-	if !exists {
-		db = make(dbStat, 8)
-	}
-
-	if _, exists = db[idx]; exists {
-		err = fmt.Errorf("stat for %s.%d already exists", name, idx)
+	_, exists := stat.Stat[name]
+	if exists {
+		err = fmt.Errorf(`stat for "%s" already exists`, name)
 		return
 	}
 
-	db[idx] = newConnStat()
-
-	stat.Stat[name] = db
+	stat.Stat[name] = newConnStat()
 
 	return
 }
@@ -223,11 +209,11 @@ func newFuncStat() *funcStat {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) statBegin(idx int, isExec bool) {
+func (db *DB) statBegin(isExec bool) {
 	stat.mutex.Lock()
 	defer stat.mutex.Unlock()
 
-	c := db.getConnStat(idx)
+	c := db.getConnStat()
 	if c == nil {
 		return
 	}
@@ -239,11 +225,11 @@ func (db *DB) statBegin(idx int, isExec bool) {
 	}
 }
 
-func (db *DB) statEnd(idx int, isExec bool, duration time.Duration) {
+func (db *DB) statEnd(isExec bool, duration time.Duration) {
 	stat.mutex.Lock()
 	defer stat.mutex.Unlock()
 
-	c := db.getConnStat(idx)
+	c := db.getConnStat()
 	if c == nil {
 		return
 	}
@@ -255,22 +241,22 @@ func (db *DB) statEnd(idx int, isExec bool, duration time.Duration) {
 	}
 }
 
-func (db *DB) getConnStat(idx int) (c *connStat) {
-	// уже залочено!
+func (db *DB) getConnStat() (c *connStat) {
+	// already locked!
 
-	d, exists := stat.Stat[db.Name]
+	c, exists := stat.Stat[db.Name]
 	if !exists {
+		c = nil
 		return
 	}
 
-	c = d[idx]
 	return
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func (f *funcStat) begin() {
-	// уже залочено!
+	// already locked!
 
 	f.InProgress++
 	f.TotalRequests++
@@ -331,27 +317,15 @@ func (x *DB) Check(cfg any) (err error) {
 		msgs.Add("empty driver")
 	}
 
-	if len(x.DSN) == 0 {
-		msgs.Add("empty dsn")
-	}
-
 	return msgs.Error()
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) Connect(idx int) (conn *sqlx.DB, doRetry bool, err error) {
-
-	// отрицательный idx оставим на будущее, например выбор произвольной базы
-
-	if idx < 0 || idx >= int(len(db.DSN)) {
-		err = fmt.Errorf("illegal db index %d, expected from 0 to %d", idx, len(db.DSN))
-		return
-	}
-
+func (db *DB) Connect() (conn *sqlx.DB, doRetry bool, err error) {
 	doRetry = true
 
-	conn, err = sqlx.Open(db.Driver, db.DSN[idx])
+	conn, err = sqlx.Open(db.Driver, db.DSN)
 	if err != nil {
 		return
 	}
@@ -361,7 +335,7 @@ func (db *DB) Connect(idx int) (conn *sqlx.DB, doRetry bool, err error) {
 		return
 	}
 
-	err = newStat(db.Name, idx)
+	err = newStat(db.Name)
 	if err != nil {
 		return
 	}
@@ -375,56 +349,49 @@ func (c Config) ConnectAll() (err error) {
 	msgs := misc.NewMessages()
 
 	wg := new(sync.WaitGroup)
-	for _, db := range c {
-		wg.Add(len(db.DSN))
-	}
+	wg.Add(len(c))
 
 	for _, db := range c {
-		db.conn = make([]*sqlx.DB, len(db.DSN))
+		db := db
 
-		for i := 0; i < len(db.DSN); i++ {
-			db := db
-			idx := i
+		go func() {
+			panicID := panic.ID()
+			defer panic.SaveStackToLogEx(panicID)
 
-			go func() {
-				panicID := panic.ID()
-				defer panic.SaveStackToLogEx(panicID)
+			defer wg.Done()
 
-				defer wg.Done()
+			if db.DSN == "" {
+				Log.Message(log.INFO, "[%s] empty DSN, skipped", db.Name)
+				return
+			}
 
-				if db.DSN[idx] == "" {
-					Log.Message(log.INFO, "[%s.%d] empty DSN, skipped", db.Name, idx)
-					return
-				}
-
-				for misc.AppStarted() {
-					conn, doRetry, err := db.Connect(idx)
-					if err != nil {
-						Log.Message(log.WARNING, "[%s.%d] %s", db.Name, idx, err)
-						if !doRetry {
-							return
-						}
-						misc.Sleep(5 * time.Second)
-						continue
+			for misc.AppStarted() {
+				conn, doRetry, err := db.Connect()
+				if err != nil {
+					Log.Message(log.WARNING, "[%s] %s", db.Name, err)
+					if !doRetry {
+						return
 					}
-
-					db.conn[idx] = conn
-
-					Log.Message(log.INFO, "[%s.%d] database connection created", db.Name, idx)
-
-					misc.AddExitFunc(
-						fmt.Sprintf("db[%s.%d]", db.Name, idx),
-						func(_ int, _ any) {
-							conn.Close()
-							Log.Message(log.INFO, "[%s.%d] database connection closed", db.Name, idx)
-						},
-						nil,
-					)
-
-					break
+					misc.Sleep(5 * time.Second)
+					continue
 				}
-			}()
-		}
+
+				db.conn = conn
+
+				Log.Message(log.INFO, "[%s] database connection created", db.Name)
+
+				misc.AddExitFunc(
+					fmt.Sprintf("db[%s]", db.Name),
+					func(_ int, _ any) {
+						conn.Close()
+						Log.Message(log.INFO, "[%s] database connection closed", db.Name)
+					},
+					nil,
+				)
+
+				break
+			}
+		}()
 	}
 
 	wg.Wait()
@@ -467,21 +434,16 @@ func GetQuery(dbName string, queryName string) (q string, err error) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func GetConn(dbName string, idx int) (conn *sqlx.DB, err error) {
+func GetConn(dbName string) (conn *sqlx.DB, err error) {
 	db, err := GetDB(dbName)
 	if err != nil {
 		return
 	}
 
-	if idx < 0 || idx >= len(db.DSN) {
-		err = fmt.Errorf("%s: illegal db index %d, expected from 0 to %d", db.Name, idx, len(db.DSN))
-		return
-	}
-
-	conn = db.conn[idx]
+	conn = db.conn
 
 	if conn == nil {
-		err = fmt.Errorf("database %s.%d is not connected", dbName, idx)
+		err = fmt.Errorf("database %s is not connected", dbName)
 		return
 
 	}
@@ -491,7 +453,7 @@ func GetConn(dbName string, idx int) (conn *sqlx.DB, err error) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) Query(idx int, dest any, queryName string, fields []string, vars []any) (err error) {
+func (db *DB) Query(dest any, queryName string, fields []string, vars []any) (err error) {
 	t0 := misc.NowUnixNano()
 
 	defer func() {
@@ -500,9 +462,9 @@ func (db *DB) Query(idx int, dest any, queryName string, fields []string, vars [
 		}
 	}()
 
-	db.statBegin(idx, false)
+	db.statBegin(false)
 	defer func() {
-		db.statEnd(idx, false, time.Duration(misc.NowUnixNano()-t0))
+		db.statEnd(false, time.Duration(misc.NowUnixNano()-t0))
 	}()
 
 	id := atomic.AddUint64(&lastID, 1)
@@ -523,7 +485,7 @@ func (db *DB) Query(idx int, dest any, queryName string, fields []string, vars [
 		return
 	}
 
-	conn, preparedVars, q, err := db.prepareQuery(idx, queryName, 0, vars)
+	conn, preparedVars, q, err := db.prepareQuery(queryName, vars)
 	if err != nil {
 		return
 	}
@@ -597,18 +559,18 @@ func (db *DB) query(conn *sqlx.DB, dest any, q string, preparedVars []any) (err 
 	}
 }
 
-func Query(dbName string, idx int, dest any, queryName string, fields []string, vars []any) (err error) {
+func Query(dbName string, dest any, queryName string, fields []string, vars []any) (err error) {
 	db, err := GetDB(dbName)
 	if err != nil {
 		return
 	}
 
-	return db.Query(idx, dest, queryName, fields, vars)
+	return db.Query(dest, queryName, fields, vars)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) ExecEx(idx int, dest any, queryName string, tp PatternType, startIdx int, fields []string, vars []any) (result sql.Result, err error) {
+func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
 	t0 := misc.NowUnixNano()
 
 	defer func() {
@@ -617,9 +579,9 @@ func (db *DB) ExecEx(idx int, dest any, queryName string, tp PatternType, startI
 		}
 	}()
 
-	db.statBegin(idx, true)
+	db.statBegin(true)
 	defer func() {
-		db.statEnd(idx, true, time.Duration(misc.NowUnixNano()-t0))
+		db.statEnd(true, time.Duration(misc.NowUnixNano()-t0))
 	}()
 
 	id := atomic.AddUint64(&lastID, 1)
@@ -630,12 +592,12 @@ func (db *DB) ExecEx(idx int, dest any, queryName string, tp PatternType, startI
 		Log.MessageWithSource(log.TRACE2, logSrc, "%s %v", queryName, vars)
 	}
 
-	conn, preparedVars, q, err := db.prepareQuery(idx, queryName, startIdx, vars)
+	conn, preparedVars, q, err := db.prepareQuery(queryName, vars)
 	if err != nil {
 		return
 	}
 
-	q = fillFields(q, tp, startIdx, fields)
+	q = fillFields(q, tp, firstDataFieldIdx, fields)
 
 	if dest == nil || reflect.ValueOf(dest).IsNil() {
 		result, err = conn.Exec(q, preparedVars...)
@@ -650,26 +612,26 @@ func (db *DB) ExecEx(idx int, dest any, queryName string, tp PatternType, startI
 	return
 }
 
-func ExecEx(dbName string, idx int, dest any, queryName string, tp PatternType, startIdx int, fields []string, vars []any) (result sql.Result, err error) {
+func ExecEx(dbName string, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
 	db, err := GetDB(dbName)
 	if err != nil {
 		return
 	}
 
-	return db.ExecEx(idx, dest, queryName, tp, startIdx, fields, vars)
+	return db.ExecEx(dest, queryName, tp, firstDataFieldIdx, fields, vars)
 }
 
-func (db *DB) Exec(idx int, queryName string, vars []any) (result sql.Result, err error) {
-	return db.ExecEx(idx, nil, queryName, PatternTypeNone, 0, nil, vars)
+func (db *DB) Exec(queryName string, vars []any) (result sql.Result, err error) {
+	return db.ExecEx(nil, queryName, PatternTypeNone, 0, nil, vars)
 }
 
-func Exec(dbName string, idx int, queryName string, vars []any) (result sql.Result, err error) {
-	return ExecEx(dbName, idx, nil, queryName, PatternTypeNone, 0, nil, vars)
+func Exec(dbName string, queryName string, vars []any) (result sql.Result, err error) {
+	return ExecEx(dbName, nil, queryName, PatternTypeNone, 0, nil, vars)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) prepareQuery(idx int, queryName string, startIdx int, vars []any) (conn *sqlx.DB, preparedVars []any, q string, err error) {
+func (db *DB) prepareQuery(queryName string, vars []any) (conn *sqlx.DB, preparedVars []any, q string, err error) {
 	if queryName != "" && queryName[0] == '#' {
 		q = queryName[1:]
 	} else {
@@ -679,7 +641,7 @@ func (db *DB) prepareQuery(idx int, queryName string, startIdx int, vars []any) 
 		}
 	}
 
-	conn, err = GetConn(db.Name, idx)
+	conn, err = GetConn(db.Name)
 	if err != nil {
 		return
 	}
@@ -763,7 +725,7 @@ func doSubst(q string, vars []any) (newQ string, newVars []any, err error) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func fillFields(q string, tp PatternType, startIdx int, fields []string) string {
+func fillFields(q string, tp PatternType, firstDataFieldIdx int, fields []string) string {
 	nf := len(fields)
 
 	switch tp {
@@ -778,7 +740,7 @@ func fillFields(q string, tp PatternType, startIdx int, fields []string) string 
 
 		vv := make([]string, nf)
 		for i := 0; i < nf; i++ {
-			vv[i] = "$" + strconv.FormatInt(int64(startIdx+i), 10)
+			vv[i] = "$" + strconv.FormatInt(int64(firstDataFieldIdx+i), 10)
 		}
 		v := strings.Join(vv, ",")
 
@@ -795,7 +757,7 @@ func fillFields(q string, tp PatternType, startIdx int, fields []string) string 
 	case PatternTypeUpdate:
 		vv := make([]string, nf)
 		for i := 0; i < nf; i++ {
-			vv[i] = fmt.Sprintf("%s=$%d", fields[i], startIdx+i)
+			vv[i] = fmt.Sprintf("%s=$%d", fields[i], firstDataFieldIdx+i)
 		}
 
 		v := strings.Join(vv, ",")
