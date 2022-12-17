@@ -785,6 +785,7 @@ func fillFields(q string, tp PatternType, firstDataFieldIdx int, fields []string
 
 type (
 	FieldsList struct {
+		json    misc.StringMap // jsonName -> struct field name
 		all     []string
 		allSrc  []string
 		regular []string
@@ -798,6 +799,10 @@ type (
 		Format string
 	}
 )
+
+func (fields *FieldsList) Json() misc.StringMap {
+	return fields.json
+}
 
 func (fields *FieldsList) All() []string {
 	return fields.all
@@ -885,6 +890,14 @@ func (fields *FieldsList) JbPrepareBuild(vars misc.InterfaceMap) (jb JbBuildForm
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func MakeFieldsList(o any) (fields *FieldsList, err error) {
+	return makeFieldsList(o, "")
+}
+
+func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
+	if path != "" {
+		path += "."
+	}
+
 	t := reflect.TypeOf(o)
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -897,6 +910,7 @@ func MakeFieldsList(o any) (fields *FieldsList, err error) {
 
 	n := t.NumField()
 	fields = &FieldsList{
+		json:    make(misc.StringMap, n),
 		all:     make([]string, 0, n),
 		allSrc:  make([]string, 0, n),
 		regular: make([]string, 0, n),
@@ -923,6 +937,8 @@ func MakeFieldsList(o any) (fields *FieldsList, err error) {
 		}
 
 		if name != "" {
+			fields.json[path+misc.StructFieldName(&sf, "json")] = sf.Name
+
 			field := name
 			as := name
 
@@ -969,13 +985,18 @@ func MakeFieldsList(o any) (fields *FieldsList, err error) {
 		}
 
 		var subFields *FieldsList
-		subFields, err = MakeFieldsList(reflect.New(t).Interface())
+		subFields, err = makeFieldsList(reflect.New(t).Interface(), path+misc.StructFieldName(&sf, "json"))
 		if err != nil {
 			return
 		}
 
 		fields.all = append(fields.all, subFields.all...)
+		fields.allSrc = append(fields.allSrc, subFields.allSrc...)
 		fields.regular = append(fields.regular, subFields.regular...)
+
+		for k, v := range subFields.json {
+			fields.json[k] = v
+		}
 
 		for k, v := range subFields.jbShort {
 			fields.jbShort[k] = v
