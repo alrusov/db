@@ -15,7 +15,7 @@ func Test1(t *testing.T) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func TestFillFields(t *testing.T) {
+func TestFillPatterns(t *testing.T) {
 	params := []struct {
 		src      string
 		tp       PatternType
@@ -99,7 +99,7 @@ func TestFillFields(t *testing.T) {
 	}
 
 	for i, p := range params {
-		q := fillFields(p.src, p.tp, p.startIdx, p.fields)
+		q := fillPatterns(p.src, p.tp, p.startIdx, p.fields)
 
 		if q != p.expected {
 			t.Errorf(`[%d] got "%s", expected "%s"`, i+1, q, p.expected)
