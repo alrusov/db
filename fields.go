@@ -174,14 +174,25 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 			defVal, ok := sf.Tag.Lookup("default")
 			if ok {
 				v := reflect.New(t).Interface()
-				err = misc.Iface2IfacePtr(defVal, v)
-				if err == nil {
-					v = reflect.ValueOf(v).Elem().Interface()
-					if sf.Type.Kind() == reflect.String {
-						v = "'" + v.(string) + "'"
-					}
-					field = fmt.Sprintf("COALESCE(%s, %v)", name, v)
+				switch v.(type) {
+				case Duration, *Duration:
+					s := ""
+					v = &s
+				default:
 				}
+
+				err = misc.Iface2IfacePtr(defVal, v)
+				if err != nil {
+					err = fmt.Errorf("%s(default): %s", name, err)
+					return
+				}
+
+				vv := reflect.ValueOf(v).Elem()
+				v = vv.Interface()
+				if vv.Kind() == reflect.String {
+					v = "'" + v.(string) + "'"
+				}
+				field = fmt.Sprintf("COALESCE(%s, %v)", name, v)
 			}
 
 			s := fmt.Sprintf(`%s AS "%s"`, field, as)
@@ -194,7 +205,7 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 				fields.regular = append(fields.regular, s)
 			} else {
 				if tp == "" {
-					tp = dbTpOf(t.Kind())
+					tp = dbTpOf(t)
 				}
 				if tp != "" {
 					fields.jbFull[name] = tp
@@ -241,23 +252,29 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func dbTpOf(k reflect.Kind) string {
-	switch k {
-	default:
-		return ""
-
-	case reflect.Bool:
-		return "bool"
-
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return "int"
-
-	case reflect.Float32, reflect.Float64:
-		return "float"
-
-	case reflect.String:
+func dbTpOf(t reflect.Type) string {
+	switch reflect.New(t).Interface().(type) {
+	case Duration, *Duration:
 		return "varchar"
+
+	default:
+		switch t.Kind() {
+		default:
+			return ""
+
+		case reflect.Bool:
+			return "bool"
+
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return "int"
+
+		case reflect.Float32, reflect.Float64:
+			return "float"
+
+		case reflect.String:
+			return "varchar"
+		}
 	}
 }
 

@@ -4,6 +4,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"reflect"
@@ -328,17 +329,21 @@ func (db *DB) Query(dest any, queryName string, fields []string, vars []any) (er
 
 	q = fillPatterns(q, PatternTypeSelect, 0, fields)
 
-	return db.query(conn, dest, q, preparedVars)
+	return db.query(conn, nil, dest, q, preparedVars)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) query(conn *sqlx.DB, dest any, q string, preparedVars []any) (err error) {
+func (db *DB) query(conn *sqlx.DB, tx *sqlx.Tx, dest any, q string, preparedVars []any) (err error) {
 	switch dest := dest.(type) {
 	default:
 		if k := reflect.Indirect(reflect.ValueOf(dest)).Kind(); k == reflect.Slice {
 			// Слайс [предположительно] структур - пытаемся залить данные туда
-			err = conn.Select(dest, q, preparedVars...)
+			if tx == nil {
+				err = conn.Select(dest, q, preparedVars...)
+			} else {
+				err = tx.Select(dest, q, preparedVars...)
+			}
 			return
 		}
 
@@ -349,7 +354,11 @@ func (db *DB) query(conn *sqlx.DB, dest any, q string, preparedVars []any) (err 
 		// Иначе - зальем в []InterfaceMap
 
 		var rows *sqlx.Rows
-		rows, err = conn.Queryx(q, preparedVars...)
+		if tx == nil {
+			rows, err = conn.Queryx(q, preparedVars...)
+		} else {
+			rows, err = tx.Queryx(q, preparedVars...)
+		}
 		if err != nil {
 			return err
 		}
@@ -431,14 +440,27 @@ func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldI
 
 	q = fillPatterns(q, tp, firstDataFieldIdx, fields)
 
-	if dest == nil || reflect.ValueOf(dest).IsNil() {
-		result, err = conn.Exec(q, preparedVars...)
-	} else {
-		err = db.query(conn, dest, q, preparedVars)
-		result = nil
-	}
+	ctx := context.Background()
+
+	tx, err := conn.BeginTxx(ctx, nil)
 	if err != nil {
 		return
+	}
+
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+
+		err = tx.Commit()
+	}()
+
+	if dest == nil || reflect.ValueOf(dest).IsNil() {
+		result, err = tx.ExecContext(ctx, q, preparedVars...)
+	} else {
+		err = db.query(conn, tx, dest, q, preparedVars)
+		result = nil
 	}
 
 	return
