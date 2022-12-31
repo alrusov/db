@@ -46,6 +46,8 @@ type (
 		name  string
 		value any
 	}
+
+	Bulk [][]any
 )
 
 const (
@@ -318,7 +320,7 @@ func (db *DB) Query(dest any, queryName string, fields []string, vars []any) (er
 		return
 	}
 
-	conn, preparedVars, q, err := db.prepareQuery(queryName, vars)
+	conn, preparedVars, _, q, err := db.prepareQuery(queryName, vars)
 	if err != nil {
 		return
 	}
@@ -411,6 +413,30 @@ func Query(dbName string, dest any, queryName string, fields []string, vars []an
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
+type Result struct {
+	ids  []int64
+	rows int64
+}
+
+func (r Result) AllInsertId() ([]int64, error) {
+	return r.ids, nil
+}
+
+func (r Result) LastInsertId() (int64, error) {
+	ln := len(r.ids)
+	if ln == 0 {
+		return 0, nil
+	}
+
+	return r.ids[ln-1], nil
+}
+
+func (r Result) RowsAffected() (int64, error) {
+	return r.rows, nil
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
 func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
 	t0 := misc.NowUnixNano()
 
@@ -433,7 +459,7 @@ func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldI
 		Log.MessageWithSource(log.TRACE2, logSrc, "%s %v", queryName, vars)
 	}
 
-	conn, preparedVars, q, err := db.prepareQuery(queryName, vars)
+	conn, preparedVars, bulk, q, err := db.prepareQuery(queryName, vars)
 	if err != nil {
 		return
 	}
@@ -456,12 +482,87 @@ func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldI
 		err = tx.Commit()
 	}()
 
-	if dest == nil || reflect.ValueOf(dest).IsNil() {
-		result, err = tx.ExecContext(ctx, q, preparedVars...)
-	} else {
-		err = db.query(conn, tx, dest, q, preparedVars)
-		result = nil
+	withDest := !(dest == nil || reflect.ValueOf(dest).IsNil())
+
+	if bulk == nil {
+		// simple exec
+
+		if withDest {
+			err = db.query(conn, tx, dest, q, preparedVars)
+			result = nil
+		} else {
+			result, err = tx.ExecContext(ctx, q, preparedVars...)
+		}
+
+		return
 	}
+
+	// bulk exec (usually an insert)
+
+	stmt, err := tx.Preparex(q)
+	if err != nil {
+		return
+	}
+
+	defer stmt.Close()
+
+	if withDest {
+		t := reflect.TypeOf(dest)
+		if t.Kind() != reflect.Ptr {
+			err = fmt.Errorf("dest %T is not a pointer", dest)
+			return
+		}
+
+		t = t.Elem()
+
+		if t.Kind() != reflect.Slice {
+			err = fmt.Errorf("dest %T is not a pointer to slice", dest)
+			return
+		}
+
+		qDestV := reflect.New(t)
+		qDest := qDestV.Interface()
+
+		allDestV := reflect.New(t).Elem()
+
+		for _, vars := range bulk {
+			err = stmt.SelectContext(ctx, qDest, vars...)
+			if err != nil {
+				return
+			}
+
+			allDestV = reflect.AppendSlice(allDestV, qDestV.Elem())
+		}
+
+		reflect.ValueOf(dest).Elem().Set(allDestV)
+		return
+	}
+
+	// without dest
+
+	res := &Result{
+		ids: make([]int64, 0, len(bulk)),
+	}
+
+	for _, vars := range bulk {
+		var r sql.Result
+		r, err = stmt.ExecContext(ctx, vars...)
+		if err != nil {
+			return
+		}
+
+		id, e := r.LastInsertId()
+		if e == nil {
+			res.ids = append(res.ids, id)
+		}
+
+		n, e := r.RowsAffected()
+		if e == nil {
+			res.rows += n
+		}
+	}
+
+	result = res
 
 	return
 }
@@ -485,7 +586,7 @@ func Exec(dbName string, queryName string, vars []any) (result sql.Result, err e
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) prepareQuery(queryName string, vars []any) (conn *sqlx.DB, preparedVars []any, q string, err error) {
+func (db *DB) prepareQuery(queryName string, vars []any) (conn *sqlx.DB, preparedVars []any, bulk Bulk, q string, err error) {
 	if queryName != "" && queryName[0] == '#' {
 		q = queryName[1:]
 	} else {
@@ -509,14 +610,20 @@ func (db *DB) prepareQuery(queryName string, vars []any) (conn *sqlx.DB, prepare
 	copy(preparedVars, vars)
 
 	for _, v := range preparedVars {
-		if reflect.ValueOf(v).Kind() == reflect.Slice {
-			q, preparedVars, err = sqlx.In(q, preparedVars...)
-			if err != nil {
-				return
-			}
+		switch v := v.(type) {
+		case Bulk:
+			bulk = append(bulk, v...)
 
-			q = conn.Rebind(q)
-			break
+		default:
+			if reflect.ValueOf(v).Kind() == reflect.Slice {
+				q, preparedVars, err = sqlx.In(q, preparedVars...)
+				if err != nil {
+					return
+				}
+
+				q = conn.Rebind(q)
+				break
+			}
 		}
 	}
 
@@ -556,7 +663,7 @@ func doSubst(q string, vars []any) (newQ string, newVars []any, err error) {
 					return
 				}
 
-			case JbBuildFormats:
+			case JbPairs:
 				ln := len(val)
 				vv := make([]string, ln)
 				for i := 0; i < ln; i++ {

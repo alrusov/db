@@ -18,10 +18,12 @@ type (
 		regular []string
 		jbFull  misc.StringMap // name -> type
 		jbShort misc.StringMap // name -> type
+		defVals misc.InterfaceMap
+		types   map[string]reflect.Type
 	}
 
-	JbBuildFormats []*JbBuildFormat
-	JbBuildFormat  struct {
+	JbPairs []*JbPair
+	JbPair  struct {
 		Idx    int
 		Format string
 	}
@@ -77,42 +79,113 @@ func (fields *FieldsList) JbSelectStr() string {
 	return strings.Join(list, ",")
 }
 
-func (fields *FieldsList) JbPrepareBuild(vars misc.InterfaceMap) (jb JbBuildFormats, names []string, vals []any) {
+// jbPairs - шаблоны пар jb (имя, поставляемая переменная) с индексом переменной (среди jb полей)
+// names   - имена выбираемых обычных полей
+// rows    - строки, с данными, сначала в соответствии с names, потом jb
+func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, names []string, rows Bulk) {
 	ln := len(fields.all)
 	if ln == 0 {
 		return
 	}
 
-	jb = make(JbBuildFormats, 0, ln)
-	names = make([]string, 0, len(vars))
-	vals = make([]any, 0, len(vars))
-	jbVals := make([]any, 0, len(vars))
+	jbPairs = make(JbPairs, 0, ln)
+	names = make([]string, ln) // потом обрежем
+	rows = make(Bulk, 0, len(data))
+	rowsJb := make(Bulk, 0, len(data))
 
-	idx := 0
+	knownNames := make(misc.IntMap, ln) // name -> idx
 
-	for name, val := range vars {
-		tp, exists := fields.jbFull[name]
+	currIdx := 0
+	currIdxJb := 0
 
-		n := strings.Split(name, ".")
-		if len(n) > 1 {
-			name = n[len(n)-1]
+	for _, row := range data {
+		vals := make([]any, ln)
+		valsJb := make([]any, ln)
+
+		for fullName, val := range row {
+			// Имя без прификса
+			name := fullName
+			nameParts := strings.Split(fullName, ".")
+			if len(nameParts) > 1 {
+				name = nameParts[len(nameParts)-1]
+			}
+
+			tp, isJb := fields.jbFull[fullName]
+
+			isNew := false
+
+			// Получаем текущий индекс в соответствующем блоке
+
+			idx, exists := knownNames[fullName]
+			if !exists {
+				isNew = true
+
+				idx = currIdx
+				if isJb {
+					idx = currIdxJb
+					currIdxJb++
+				} else {
+					currIdx++
+				}
+
+				knownNames[fullName] = idx
+			}
+
+			// Преобразуем значение в правильный тип
+
+			v := reflect.New(fields.types[fullName]).Interface()
+			switch v.(type) {
+			case Duration, *Duration:
+				s := ""
+				v = &s
+			default:
+			}
+
+			e := misc.Iface2IfacePtr(val, v)
+			if e == nil {
+				val = v
+			}
+
+			if !isJb {
+				// Обычное поле
+				names[idx] = name // каждый раз, но пусть так
+				vals[idx] = val
+				continue
+			}
+
+			// jb поле
+
+			if isNew {
+				jbPairs = append(jbPairs,
+					&JbPair{
+						Idx:    idx,
+						Format: fmt.Sprintf("'%s',$%%d::%s", name, tp),
+					},
+				)
+			}
+
+			valsJb[idx] = val
 		}
 
-		if !exists {
-			names = append(names, name)
-			vals = append(vals, val)
-			continue
-		}
-
-		jb = append(jb, &JbBuildFormat{
-			Idx:    idx,
-			Format: fmt.Sprintf("'%s',$%%d::%s", name, tp),
-		})
-		idx++
-		jbVals = append(jbVals, val)
+		rows = append(rows, vals)
+		rowsJb = append(rowsJb, valsJb)
 	}
 
-	vals = append(vals, jbVals...)
+	names = names[0:currIdx]
+
+	for i := range rows {
+		rows[i] = rows[i][0:currIdx]
+		rows[i] = append(rows[i], rowsJb[i][:currIdxJb]...)
+
+		for j, v := range rows[i] {
+			if v == nil {
+				if defVal, exists := fields.defVals[names[j]]; exists {
+					rows[i][j] = defVal
+				}
+			}
+		}
+	}
+
 	return
 }
 
@@ -145,6 +218,8 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 		regular: make([]string, 0, n),
 		jbFull:  make(misc.StringMap, n),
 		jbShort: make(misc.StringMap, n),
+		defVals: make(misc.InterfaceMap, n),
+		types:   make(map[string]reflect.Type, n),
 	}
 
 	for i := 0; i < n; i++ {
@@ -166,13 +241,17 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 		}
 
 		if name != "" {
+			fields.types[name] = misc.BaseType(t)
+
 			fields.json[path+misc.StructFieldName(&sf, "json")] = sf.Name
 
 			field := name
 			as := name
 
 			defVal, ok := sf.Tag.Lookup("default")
-			if ok {
+			if !ok {
+				fields.defVals[name] = nil
+			} else {
 				v := reflect.New(t).Interface()
 				switch v.(type) {
 				case Duration, *Duration:
@@ -186,6 +265,8 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 					err = fmt.Errorf("%s(default): %s", name, err)
 					return
 				}
+
+				fields.defVals[name] = v
 
 				vv := reflect.ValueOf(v).Elem()
 				v = vv.Interface()
@@ -244,6 +325,10 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 
 		for k, v := range subFields.jbFull {
 			fields.jbFull[k] = v
+		}
+
+		for k, v := range subFields.defVals {
+			fields.defVals[k] = v
 		}
 	}
 
