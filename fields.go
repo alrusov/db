@@ -241,40 +241,38 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 		}
 
 		if name != "" {
-			fields.types[name] = misc.BaseType(t)
-
-			fields.json[path+misc.StructFieldName(&sf, "json")] = sf.Name
-
 			field := name
 			as := name
 
-			defVal, ok := sf.Tag.Lookup("default")
-			if !ok {
-				fields.defVals[name] = nil
-			} else {
-				v := reflect.New(t).Interface()
-				switch v.(type) {
-				case Duration, *Duration:
-					s := ""
-					v = &s
-				default:
-				}
+			fields.json[path+misc.StructFieldName(&sf, "json")] = sf.Name
+			fields.types[name] = misc.BaseType(t)
 
+			v := reflect.New(fields.types[name]).Interface()
+			switch v.(type) {
+			case Duration, *Duration:
+				s := ""
+				v = &s
+			default:
+			}
+
+			defVal, defValExists := sf.Tag.Lookup("default")
+			if defValExists {
 				err = misc.Iface2IfacePtr(defVal, v)
 				if err != nil {
 					err = fmt.Errorf("%s(default): %s", name, err)
 					return
 				}
 
-				fields.defVals[name] = v
-
 				vv := reflect.ValueOf(v).Elem()
 				v = vv.Interface()
 				if vv.Kind() == reflect.String {
-					v = "'" + v.(string) + "'"
+					v = fmt.Sprintf("'%s'", v)
 				}
+				// time.Time???
 				field = fmt.Sprintf("COALESCE(%s, %v)", name, v)
 			}
+
+			fields.defVals[name] = v
 
 			s := fmt.Sprintf(`%s AS "%s"`, field, as)
 			fields.all = append(fields.all, s)
