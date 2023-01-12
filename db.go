@@ -109,6 +109,14 @@ func Subst(name string, value any) *SubstArg {
 	}
 }
 
+func (a *SubstArg) Name() string {
+	return a.name
+}
+
+func (a *SubstArg) Value() any {
+	return a.value
+}
+
 //----------------------------------------------------------------------------------------------------------------------------//
 
 // Проверка валидности Config
