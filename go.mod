@@ -3,6 +3,7 @@ module github.com/alrusov/db
 go 1.19
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/alrusov/config v0.1.50
 	github.com/alrusov/initializer v0.1.2
 	github.com/alrusov/jsonw v0.1.3

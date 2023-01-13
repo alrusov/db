@@ -1,3 +1,5 @@
+github.com/DATA-DOG/go-sqlmock v1.5.0 h1:Shsta01QNfFxHCfpW6YH2STWB0MudeXXEWMr20OEh60=
+github.com/DATA-DOG/go-sqlmock v1.5.0/go.mod h1:f/Ixk793poVmq4qj/V1dPUg2JEAKC73Q5eFN3EC/SaM=
 github.com/alrusov/config v0.1.50 h1:j4k97JNWLha3g8xgawnQoBbpVD2mbNmB2bx5hO4D+gM=
 github.com/alrusov/config v0.1.50/go.mod h1:UwqSS7FmmgBu83OwiyITnh5CADr2ACQVB77mppOhEZc=
 github.com/alrusov/initializer v0.1.2 h1:AgMeT/SW7wvqo2x0cZCHaqBOpELQMjCI6yYQFMRKPv4=

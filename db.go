@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/alrusov/initializer"
@@ -38,6 +40,7 @@ type (
 		Queries        misc.StringMap `toml:"queries"`          // SQL запросы для этой базы, ключ - имя запроса
 
 		conn *sqlx.DB
+		mock sqlmock.Sqlmock
 	}
 
 	PatternType int
@@ -48,6 +51,8 @@ type (
 	}
 
 	Bulk [][]any
+
+	MockCallback func(db *DB, mock sqlmock.Sqlmock, q string, v []any) (err error)
 )
 
 const (
@@ -78,6 +83,9 @@ var (
 	lastID uint64
 
 	knownCfg *Config
+
+	mockEnabled  = false
+	mockCallback = MockCallback(nil)
 )
 
 //----------------------------------------------------------------------------------------------------------------------------//
@@ -115,6 +123,10 @@ func (a *SubstArg) Name() string {
 
 func (a *SubstArg) Value() any {
 	return a.value
+}
+
+func (a *SubstArg) String() string {
+	return fmt.Sprintf("{SubstArg(%s)=`%v`}", a.name, a.value)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
@@ -165,23 +177,65 @@ func (x *DB) Check(cfg any) (err error) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) Connect() (conn *sqlx.DB, doRetry bool, err error) {
+func EnableMock() {
+	mockEnabled = true
+}
+
+func IsMockEnabled() bool {
+	return mockEnabled
+}
+
+func SetMockCallback(f MockCallback) {
+	mockCallback = f
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+// Сrooked workaround for the mock NamedArg with slice problem
+
+type mockBlackHole struct{}
+
+func (bh mockBlackHole) ConvertValue(v any) (driver.Value, error) {
+	return nil, nil
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+func (db *DB) Connect() (doRetry bool, err error) {
 	doRetry = true
 
-	conn, err = sqlx.Open(db.Driver, db.DSN)
-	if err != nil {
-		return
-	}
+	var conn *sqlx.DB
+	var mock sqlmock.Sqlmock
 
-	err = conn.Ping()
-	if err != nil {
-		return
+	if mockEnabled {
+		var stdDB *sql.DB
+
+		stdDB, mock, err = sqlmock.New(sqlmock.ValueConverterOption(mockBlackHole{}))
+		if err != nil {
+			return
+		}
+
+		conn = sqlx.NewDb(stdDB, db.Driver)
+
+	} else {
+		conn, err = sqlx.Open(db.Driver, db.DSN)
+		if err != nil {
+			return
+		}
+
+		err = conn.Ping()
+		if err != nil {
+			return
+		}
 	}
 
 	err = newStat(db.Name)
 	if err != nil {
 		return
 	}
+
+	db.conn = conn
+	db.mock = mock
 
 	return
 }
@@ -209,7 +263,7 @@ func (c Config) ConnectAll() (err error) {
 			}
 
 			for misc.AppStarted() {
-				conn, doRetry, err := db.Connect()
+				doRetry, err := db.Connect()
 				if err != nil {
 					Log.Message(log.WARNING, "[%s] %s", db.Name, err)
 					if !doRetry {
@@ -219,14 +273,12 @@ func (c Config) ConnectAll() (err error) {
 					continue
 				}
 
-				db.conn = conn
-
 				Log.Message(log.INFO, "[%s] database connection created", db.Name)
 
 				misc.AddExitFunc(
 					fmt.Sprintf("db[%s]", db.Name),
 					func(_ int, _ any) {
-						conn.Close()
+						db.conn.Close()
 						Log.Message(log.INFO, "[%s] database connection closed", db.Name)
 					},
 					nil,
@@ -297,6 +349,10 @@ func GetQuery(dbName string, queryName string) (q string, err error) {
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func (db *DB) Query(dest any, queryName string, fields []string, vars []any) (err error) {
+	return db.QueryWithMock(nil, dest, queryName, fields, vars)
+}
+
+func (db *DB) QueryWithMock(mock MockCallback, dest any, queryName string, fields []string, vars []any) (err error) {
 	t0 := misc.NowUnixNano()
 
 	defer func() {
@@ -314,8 +370,24 @@ func (db *DB) Query(dest any, queryName string, fields []string, vars []any) (er
 	logSrc := fmt.Sprintf("Q.%s.%d", db.Name, id)
 
 	if Log.CurrentLogLevel() >= log.TIME {
-		defer misc.LogProcessingTime(Log.Name(), "", id, db.Name, "", t0)
-		Log.MessageWithSource(log.TRACE2, logSrc, "%s %v", queryName, vars)
+		defer func() {
+			if err != nil {
+				Log.MessageWithSource(log.TRACE1, logSrc, "%s %s", queryName, err)
+			} else {
+				v := reflect.ValueOf(dest)
+				if v.Kind() == reflect.Pointer {
+					v = v.Elem()
+				}
+				switch v.Kind() {
+				case reflect.Slice,
+					reflect.Map:
+					Log.MessageWithSource(log.TRACE1, logSrc, "%s got %d rows", queryName, v.Len())
+				}
+			}
+			misc.LogProcessingTime(Log.Name(), "", id, db.Name, "", t0)
+		}()
+
+		Log.MessageWithSource(log.TRACE1, logSrc, "%s %v", queryName, vars)
 	}
 
 	if dest == nil {
@@ -339,16 +411,43 @@ func (db *DB) Query(dest any, queryName string, fields []string, vars []any) (er
 
 	q = fillPatterns(q, PatternTypeSelect, 0, fields)
 
-	return db.query(conn, nil, dest, q, preparedVars)
+	return db.query(mock, conn, nil, dest, q, preparedVars)
+}
+
+func Query(dbName string, dest any, queryName string, fields []string, vars []any) (err error) {
+	return QueryWithMock(nil, dbName, dest, queryName, fields, vars)
+}
+
+func QueryWithMock(mock MockCallback, dbName string, dest any, queryName string, fields []string, vars []any) (err error) {
+	db, err := GetDB(dbName)
+	if err != nil {
+		return
+	}
+
+	return db.QueryWithMock(mock, dest, queryName, fields, vars)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) query(conn *sqlx.DB, tx *sqlx.Tx, dest any, q string, preparedVars []any) (err error) {
+func (db *DB) query(mock MockCallback, conn *sqlx.DB, tx *sqlx.Tx, dest any, q string, preparedVars []any) (err error) {
+	if db.mock == nil {
+		mock = nil
+	} else if mock == nil {
+		mock = mockCallback
+	}
+
 	switch dest := dest.(type) {
 	default:
 		if k := reflect.Indirect(reflect.ValueOf(dest)).Kind(); k == reflect.Slice {
 			// Слайс [предположительно] структур - пытаемся залить данные туда
+
+			if mock != nil {
+				err = mock(db, db.mock, q, preparedVars)
+				if err != nil {
+					return
+				}
+			}
+
 			if tx == nil {
 				err = conn.Select(dest, q, preparedVars...)
 			} else {
@@ -362,6 +461,13 @@ func (db *DB) query(conn *sqlx.DB, tx *sqlx.Tx, dest any, q string, preparedVars
 
 	case *([]misc.InterfaceMap):
 		// Иначе - зальем в []InterfaceMap
+
+		if mock != nil {
+			err = mock(db, db.mock, q, preparedVars)
+			if err != nil {
+				return
+			}
+		}
 
 		var rows *sqlx.Rows
 		if tx == nil {
@@ -410,15 +516,6 @@ func (db *DB) query(conn *sqlx.DB, tx *sqlx.Tx, dest any, q string, preparedVars
 	}
 }
 
-func Query(dbName string, dest any, queryName string, fields []string, vars []any) (err error) {
-	db, err := GetDB(dbName)
-	if err != nil {
-		return
-	}
-
-	return db.Query(dest, queryName, fields, vars)
-}
-
 //----------------------------------------------------------------------------------------------------------------------------//
 
 type Result struct {
@@ -445,8 +542,22 @@ func (r Result) RowsAffected() (int64, error) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
+func (db *DB) Exec(queryName string, vars []any) (result sql.Result, err error) {
+	return db.ExecExWithMock(nil, nil, queryName, PatternTypeNone, 0, nil, vars)
+}
+
 func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
+	return db.ExecExWithMock(nil, dest, queryName, tp, firstDataFieldIdx, fields, vars)
+}
+
+func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
 	t0 := misc.NowUnixNano()
+
+	if db.mock == nil {
+		mock = nil
+	} else if mock == nil {
+		mock = mockCallback
+	}
 
 	defer func() {
 		if err != nil {
@@ -463,8 +574,14 @@ func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldI
 	logSrc := fmt.Sprintf("E.%s.%d", db.Name, id)
 
 	if Log.CurrentLogLevel() >= log.TIME {
-		defer misc.LogProcessingTime(Log.Name(), "", id, db.Name, "", t0)
-		Log.MessageWithSource(log.TRACE2, logSrc, "%s %v", queryName, vars)
+		defer func() {
+			if err != nil {
+				Log.MessageWithSource(log.TRACE1, logSrc, "%s %s", queryName, err)
+			}
+			misc.LogProcessingTime(Log.Name(), "", id, db.Name, "", t0)
+		}()
+
+		Log.MessageWithSource(log.TRACE1, logSrc, "%s %v", queryName, vars)
 	}
 
 	conn, preparedVars, bulk, q, err := db.prepareQuery(queryName, vars)
@@ -496,9 +613,17 @@ func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldI
 		// simple exec
 
 		if withDest {
-			err = db.query(conn, tx, dest, q, preparedVars)
+			err = db.query(mock, conn, tx, dest, q, preparedVars)
 			result = nil
 		} else {
+
+			if mock != nil {
+				err = mock(db, db.mock, q, preparedVars)
+				if err != nil {
+					return
+				}
+			}
+
 			result, err = tx.ExecContext(ctx, q, preparedVars...)
 		}
 
@@ -506,6 +631,13 @@ func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldI
 	}
 
 	// bulk exec (usually an insert)
+
+	if mock != nil {
+		err = mock(db, db.mock, q, preparedVars)
+		if err != nil {
+			return
+		}
+	}
 
 	stmt, err := tx.Preparex(q)
 	if err != nil {
@@ -575,21 +707,21 @@ func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldI
 	return
 }
 
+func Exec(dbName string, queryName string, vars []any) (result sql.Result, err error) {
+	return ExecExWithMock(nil, dbName, nil, queryName, PatternTypeNone, 0, nil, vars)
+}
+
 func ExecEx(dbName string, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
+	return ExecExWithMock(nil, dbName, dest, queryName, tp, firstDataFieldIdx, fields, vars)
+}
+
+func ExecExWithMock(mock MockCallback, dbName string, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
 	db, err := GetDB(dbName)
 	if err != nil {
 		return
 	}
 
-	return db.ExecEx(dest, queryName, tp, firstDataFieldIdx, fields, vars)
-}
-
-func (db *DB) Exec(queryName string, vars []any) (result sql.Result, err error) {
-	return db.ExecEx(nil, queryName, PatternTypeNone, 0, nil, vars)
-}
-
-func Exec(dbName string, queryName string, vars []any) (result sql.Result, err error) {
-	return ExecEx(dbName, nil, queryName, PatternTypeNone, 0, nil, vars)
+	return db.ExecExWithMock(mock, dest, queryName, tp, firstDataFieldIdx, fields, vars)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
