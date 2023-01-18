@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/alrusov/misc"
 )
@@ -265,10 +266,17 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 
 				vv := reflect.ValueOf(v).Elem()
 				v = vv.Interface()
-				if vv.Kind() == reflect.String {
+
+				switch vv.Kind() {
+				case reflect.String:
 					v = fmt.Sprintf("'%s'", v)
+				case reflect.Struct:
+					switch vv := v.(type) {
+					case time.Time:
+						v = fmt.Sprintf("'%s'", misc.Time2JSON(vv))
+					}
 				}
-				// time.Time???
+
 				field = fmt.Sprintf("COALESCE(%s, %v)", name, v)
 			}
 
