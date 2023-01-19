@@ -13,14 +13,16 @@ import (
 
 type (
 	FieldsList struct {
-		json    misc.StringMap // jsonName -> struct field name
-		all     []string
-		allSrc  []string
-		regular []string
-		jbFull  misc.StringMap // name -> type
-		jbShort misc.StringMap // name -> type
-		defVals misc.InterfaceMap
-		types   map[string]reflect.Type
+		json       misc.StringMap          // jsonName -> struct field name {"id": "ID"}
+		json2db    misc.StringMap          // jsonName -> db field name {"id": "o.id"}
+		all        []string                // все поля ["o.id AS \"o.id\"", "COALESCE(x.name, '') AS \"x.name\""]
+		allSrc     []string                // все поля ["o.id", "x.name"]
+		regular    []string                // обычные поля ["o.id AS \"o.id\"", "COALESCE(o.description, '') AS \"o.description\""]
+		jbFull     misc.StringMap          // name -> type {"x.name": "int"}
+		jbShort    misc.StringMap          // name -> type {"name": "int"}
+		defVals    misc.InterfaceMap       // {"o.id": 0, "x.name": ""}
+		typeByDB   map[string]reflect.Type // {"o.id": reflect.TypeOf(0)}
+		typeByJson map[string]reflect.Type // {"id": reflect.TypeOf(0)}
 	}
 
 	JbPairs []*JbPair
@@ -34,6 +36,10 @@ type (
 
 func (fields *FieldsList) Json() misc.StringMap {
 	return fields.json
+}
+
+func (fields *FieldsList) Json2db() misc.StringMap {
+	return fields.json2db
 }
 
 func (fields *FieldsList) All() []string {
@@ -79,6 +85,16 @@ func (fields *FieldsList) JbSelectStr() string {
 
 	return strings.Join(list, ",")
 }
+
+func (fields *FieldsList) TypeByDB() map[string]reflect.Type {
+	return fields.typeByDB
+}
+
+func (fields *FieldsList) TypeByJson() map[string]reflect.Type {
+	return fields.typeByJson
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
 
 // jbPairs - шаблоны пар jb (имя, поставляемая переменная) с индексом переменной (среди jb полей)
 // names   - имена выбираемых обычных полей
@@ -134,7 +150,7 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 
 			// Преобразуем значение в правильный тип
 
-			v := reflect.New(fields.types[fullName]).Interface()
+			v := reflect.New(fields.typeByDB[fullName]).Interface()
 			switch v.(type) {
 			case Duration, *Duration:
 				s := ""
@@ -193,12 +209,16 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func MakeFieldsList(o any) (fields *FieldsList, err error) {
-	return makeFieldsList(o, "")
+	return makeFieldsList(o, "", "")
 }
 
-func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
+func makeFieldsList(o any, path string, jPath string) (fields *FieldsList, err error) {
 	if path != "" {
 		path += "."
+	}
+
+	if jPath != "" {
+		jPath += "."
 	}
 
 	t := reflect.TypeOf(o)
@@ -213,14 +233,16 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 
 	n := t.NumField()
 	fields = &FieldsList{
-		json:    make(misc.StringMap, n),
-		all:     make([]string, 0, n),
-		allSrc:  make([]string, 0, n),
-		regular: make([]string, 0, n),
-		jbFull:  make(misc.StringMap, n),
-		jbShort: make(misc.StringMap, n),
-		defVals: make(misc.InterfaceMap, n),
-		types:   make(map[string]reflect.Type, n),
+		json:       make(misc.StringMap, n),
+		json2db:    make(misc.StringMap, n),
+		all:        make([]string, 0, n),
+		allSrc:     make([]string, 0, n),
+		regular:    make([]string, 0, n),
+		jbFull:     make(misc.StringMap, n),
+		jbShort:    make(misc.StringMap, n),
+		defVals:    make(misc.InterfaceMap, n),
+		typeByDB:   make(map[string]reflect.Type, n),
+		typeByJson: make(map[string]reflect.Type, n),
 	}
 
 	for i := 0; i < n; i++ {
@@ -245,10 +267,13 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 			field := name
 			as := name
 
-			fields.json[path+misc.StructFieldName(&sf, "json")] = sf.Name
-			fields.types[name] = misc.BaseType(t)
+			jName := jPath + misc.StructFieldName(&sf, "json")
+			fields.json[jName] = path + sf.Name
+			fields.json2db[jName] = name
+			fields.typeByDB[name] = misc.BaseType(t)
+			fields.typeByJson[jName] = fields.typeByDB[name]
 
-			v := reflect.New(fields.types[name]).Interface()
+			v := reflect.New(fields.typeByDB[name]).Interface()
 			switch v.(type) {
 			case Duration, *Duration:
 				s := ""
@@ -269,7 +294,7 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 
 				switch vv.Kind() {
 				case reflect.String:
-					v = fmt.Sprintf("'%s'", v)
+					v = fmt.Sprintf("'%s'", strings.Replace(v.(string), "'", "''", -1))
 				case reflect.Struct:
 					switch vv := v.(type) {
 					case time.Time:
@@ -312,7 +337,7 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 		}
 
 		var subFields *FieldsList
-		subFields, err = makeFieldsList(reflect.New(t).Interface(), path+misc.StructFieldName(&sf, "json"))
+		subFields, err = makeFieldsList(reflect.New(t).Interface(), path+sf.Name, jPath+misc.StructFieldName(&sf, "json"))
 		if err != nil {
 			return
 		}
@@ -323,6 +348,10 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 
 		for k, v := range subFields.json {
 			fields.json[k] = v
+		}
+
+		for k, v := range subFields.json2db {
+			fields.json2db[k] = v
 		}
 
 		for k, v := range subFields.jbShort {
@@ -336,6 +365,14 @@ func makeFieldsList(o any, path string) (fields *FieldsList, err error) {
 		for k, v := range subFields.defVals {
 			fields.defVals[k] = v
 		}
+
+		for k, v := range subFields.typeByDB {
+			fields.typeByDB[k] = v
+		}
+
+		for k, v := range subFields.typeByJson {
+			fields.typeByJson[k] = v
+		}
 	}
 
 	return
@@ -347,6 +384,9 @@ func dbTpOf(t reflect.Type) string {
 	switch reflect.New(t).Interface().(type) {
 	case Duration, *Duration:
 		return "varchar"
+
+	case time.Time, *time.Time:
+		return "datetime"
 
 	default:
 		switch t.Kind() {
