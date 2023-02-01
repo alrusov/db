@@ -26,6 +26,8 @@ import (
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
+// jb works with pgsql only!
+
 type (
 	// Список используемых баз данных. Ключ - имя соединения
 	Config map[string]*DB
@@ -400,7 +402,7 @@ func (db *DB) QueryWithMock(mock MockCallback, dest any, queryName string, field
 		return
 	}
 
-	conn, preparedVars, _, q, err := db.prepareQuery(queryName, vars)
+	conn, preparedVars, _, q, err := db.prepareQuery(queryName, PatternTypeSelect, vars)
 	if err != nil {
 		return
 	}
@@ -410,6 +412,10 @@ func (db *DB) QueryWithMock(mock MockCallback, dest any, queryName string, field
 	}
 
 	q = fillPatterns(q, PatternTypeSelect, 0, fields)
+
+	if Log.CurrentLogLevel() >= log.TRACE4 {
+		Log.Message(log.TRACE4, "query: %s", q)
+	}
 
 	return db.query(mock, conn, nil, dest, q, preparedVars)
 }
@@ -584,12 +590,16 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 		Log.MessageWithSource(log.TRACE1, logSrc, "%s %v", queryName, vars)
 	}
 
-	conn, preparedVars, bulk, q, err := db.prepareQuery(queryName, vars)
+	conn, preparedVars, bulk, q, err := db.prepareQuery(queryName, tp, vars)
 	if err != nil {
 		return
 	}
 
 	q = fillPatterns(q, tp, firstDataFieldIdx, fields)
+
+	if Log.CurrentLogLevel() >= log.TRACE4 {
+		Log.Message(log.TRACE4, "exec: %s", q)
+	}
 
 	ctx := context.Background()
 
@@ -726,7 +736,7 @@ func ExecExWithMock(mock MockCallback, dbName string, dest any, queryName string
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) prepareQuery(queryName string, vars []any) (conn *sqlx.DB, preparedVars []any, bulk Bulk, q string, err error) {
+func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (conn *sqlx.DB, preparedVars []any, bulk Bulk, q string, err error) {
 	if queryName != "" && queryName[0] == '#' {
 		q = queryName[1:]
 	} else {
@@ -741,7 +751,7 @@ func (db *DB) prepareQuery(queryName string, vars []any) (conn *sqlx.DB, prepare
 		return
 	}
 
-	q, vars, err = doSubst(q, vars)
+	q, vars, err = doSubst(q, tp, vars)
 	if err != nil {
 		return
 	}
@@ -772,7 +782,7 @@ func (db *DB) prepareQuery(queryName string, vars []any) (conn *sqlx.DB, prepare
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func doSubst(q string, vars []any) (newQ string, newVars []any, err error) {
+func doSubst(q string, tp PatternType, vars []any) (newQ string, newVars []any, err error) {
 	newQ = q
 
 	if len(vars) == 0 {
@@ -803,15 +813,8 @@ func doSubst(q string, vars []any) (newQ string, newVars []any, err error) {
 					return
 				}
 
-			case JbPairs:
-				ln := len(val)
-				vv := make([]string, ln)
-				for i := 0; i < ln; i++ {
-					f := val[i]
-					vv[i] = fmt.Sprintf(f.Format, f.Idx)
-				}
-
-				s = strings.Join(vv, ",")
+			case JbPairs: // for pgsql only...
+				s = val.String(tp)
 			}
 
 			newQ = strings.ReplaceAll(newQ, "@"+v.name+"@", s)
@@ -871,6 +874,72 @@ func fillPatterns(q string, tp PatternType, firstDataFieldIdx int, fields []stri
 	}
 
 	return q
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+var maxFuncPairsCount = 50
+
+func (jbp JbPairs) String(tp PatternType) (s string) {
+	_, s = jbp.block2string(tp, 0, "")
+	return
+}
+
+func (jbp JbPairs) block2string(tp PatternType, startIdx int, container string) (idx int, res string) {
+	var sb strings.Builder
+
+	defer func() {
+		sb.WriteString(")::jsonb)")
+		res = sb.String()
+	}()
+
+	n := 0
+	ln := len(jbp)
+
+	for idx = startIdx; idx < ln; {
+		f := jbp[idx]
+
+		prefix := ","
+		if n%maxFuncPairsCount == 0 {
+			if n == 0 {
+				prefix = "(jsonb_build_object("
+			} else {
+				prefix = ")||jsonb_build_object("
+			}
+		}
+
+		if container == f.FieldInfo.Container {
+			sb.WriteString(prefix)
+			sb.WriteString(fmt.Sprintf(f.Format, f.Idx))
+
+			idx++
+			n++
+			continue
+		}
+
+		if container != "" && !strings.HasPrefix(f.FieldInfo.Container, container+".") {
+			return idx, ""
+		}
+
+		var s string
+		idx, s = jbp.block2string(tp, idx, f.FieldInfo.Container)
+
+		sb.WriteString(prefix)
+		sb.WriteByte('\'')
+		sb.WriteString(f.FieldInfo.Container)
+		sb.WriteByte('\'')
+		sb.WriteByte(',')
+
+		if tp == PatternTypeUpdate && f.FieldInfo.Parent != nil && f.FieldInfo.Parent.Container != "" {
+			sb.WriteString(fmt.Sprintf("COALESCE(%s->'%s', '{}'::jsonb)||", f.FieldInfo.Parent.Container, f.FieldInfo.Container))
+		}
+
+		sb.WriteString(s)
+
+		n++
+	}
+
+	return idx, ""
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//

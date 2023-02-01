@@ -3,6 +3,7 @@ package db
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,102 +12,91 @@ import (
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
+// jb works with pgsql only!
+
 type (
 	FieldsList struct {
-		json       misc.StringMap          // jsonName -> struct field name {"id": "ID"}
-		json2db    misc.StringMap          // jsonName -> db field name {"id": "o.id"}
-		all        []string                // все поля ["o.id AS \"o.id\"", "COALESCE(x.name, '') AS \"x.name\""]
-		allSrc     []string                // все поля ["o.id", "x.name"]
-		regular    []string                // обычные поля ["o.id AS \"o.id\"", "COALESCE(o.description, '') AS \"o.description\""]
-		jbFull     misc.StringMap          // name -> type {"x.name": "int"}
-		jbShort    misc.StringMap          // name -> type {"name": "int"}
-		defVals    misc.InterfaceMap       // {"o.id": 0, "x.name": ""}
-		typeByDB   map[string]reflect.Type // {"o.id": reflect.TypeOf(0)}
-		typeByJson map[string]reflect.Type // {"id": reflect.TypeOf(0)}
+		allDbNames  []string // все поля ["o.id", "x.name"]
+		allDbSelect []string // все поля ["o.id AS \"o.id\"", "COALESCE(x.name, '') AS \"x.name\""]
+		jbFieldsStr string
+
+		byJsonName map[string]*FieldInfo // "name"->...
+		byDbName   map[string]*FieldInfo // "x.name"->...
+	}
+
+	FieldInfo struct {
+		Parent    *FieldInfo
+		Type      reflect.Type // reflect.TypeOf("")
+		Container string       // "config"
+		FieldName string       // "Name"
+		JsonName  string       // "name"
+		DbName    string       // "x.name"
+		DbSelect  string       // "COALESCE(x.name, '') AS \"x.name\""
+		JbName    string       // "name"
+		JbType    string       // "varchar"
+		DefVal    any          // 12345
 	}
 
 	JbPairs []*JbPair
 	JbPair  struct {
-		Idx    int
-		Format string
+		Idx       int
+		Format    string
+		FieldInfo *FieldInfo
 	}
 )
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (fields *FieldsList) Json() misc.StringMap {
-	return fields.json
+func (d JbPairs) Len() int {
+	return len(d)
 }
 
-func (fields *FieldsList) Json2db() misc.StringMap {
-	return fields.json2db
-}
+func (d JbPairs) Less(i, j int) bool {
+	cmp := strings.Compare(d[i].FieldInfo.Container, d[j].FieldInfo.Container)
 
-func (fields *FieldsList) All() []string {
-	return fields.all
-}
-
-func (fields *FieldsList) AllSrc() []string {
-	return fields.allSrc
-}
-
-func (fields *FieldsList) AllStr() string {
-	return strings.Join(fields.all, ",")
-}
-
-func (fields *FieldsList) Regular() []string {
-	return fields.regular
-}
-
-func (fields *FieldsList) RegularStr() string {
-	return strings.Join(fields.regular, ",")
-}
-
-func (fields *FieldsList) JbFull() misc.StringMap {
-	return fields.jbFull
-}
-
-func (fields *FieldsList) JbShort() misc.StringMap {
-	return fields.jbShort
-}
-
-func (fields *FieldsList) JbSelectStr() string {
-	ln := len(fields.jbShort)
-	if ln == 0 {
-		return ""
+	if cmp == 0 {
+		return d[i].FieldInfo.FieldName < d[j].FieldInfo.FieldName
 	}
 
-	list := make([]string, 0, ln)
-
-	for k, v := range fields.jbShort {
-		s := fmt.Sprintf("%s %s", k, v)
-		list = append(list, s)
-	}
-
-	return strings.Join(list, ",")
+	return cmp < 0
 }
 
-func (fields *FieldsList) TypeByDB() map[string]reflect.Type {
-	return fields.typeByDB
-}
-
-func (fields *FieldsList) TypeByJson() map[string]reflect.Type {
-	return fields.typeByJson
+func (d JbPairs) Swap(i, j int) {
+	d[i], d[j] = d[j], d[i]
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-// jbPairs - шаблоны пар jb (имя, поставляемая переменная) с индексом переменной (среди jb полей)
+func (fields *FieldsList) AllDbNames() []string {
+	return fields.allDbNames
+}
+
+func (fields *FieldsList) AllDbSelect() []string {
+	return fields.allDbSelect
+}
+
+func (fields *FieldsList) JbFieldsStr() string {
+	return fields.jbFieldsStr
+}
+
+func (fields *FieldsList) ByJsonName() map[string]*FieldInfo {
+	return fields.byJsonName
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+// jbPairs - шаблоны пар jb (имя, поставляемая переменная) с индексом переменной (среди jb полей) и родительским объектом
 // names   - имена выбираемых обычных полей
 // rows    - строки, с данными, сначала в соответствии с names, потом jb
 func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, names []string, rows Bulk) {
-	ln := len(fields.all)
+	ln := len(fields.allDbSelect)
 	if ln == 0 {
 		return
 	}
 
 	jbPairs = make(JbPairs, 0, ln)
 	names = make([]string, ln) // потом обрежем
+	fieldsInfo := make([]*FieldInfo, 0, ln)
 	rows = make(Bulk, 0, len(data))
 	rowsJb := make(Bulk, 0, len(data))
 
@@ -120,14 +110,12 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 		valsJb := make([]any, ln)
 
 		for fullName, val := range row {
-			// Имя без прификса
-			name := fullName
-			nameParts := strings.Split(fullName, ".")
-			if len(nameParts) > 1 {
-				name = nameParts[len(nameParts)-1]
+			fieldInfo, exists := fields.byDbName[fullName]
+			if !exists {
+				continue
 			}
 
-			tp, isJb := fields.jbFull[fullName]
+			isJb := fieldInfo.JbName != ""
 
 			isNew := false
 
@@ -136,6 +124,8 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 			idx, exists := knownNames[fullName]
 			if !exists {
 				isNew = true
+
+				fieldsInfo = append(fieldsInfo, fieldInfo)
 
 				idx = currIdx
 				if isJb {
@@ -150,7 +140,7 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 
 			// Преобразуем значение в правильный тип
 
-			v := reflect.New(fields.typeByDB[fullName]).Interface()
+			v := reflect.New(fieldInfo.Type).Interface()
 			switch v.(type) {
 			case Duration, *Duration:
 				s := ""
@@ -165,7 +155,17 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 
 			if !isJb {
 				// Обычное поле
-				names[idx] = name // каждый раз, но пусть так
+
+				name := fullName
+				nameParts := strings.Split(fullName, ".")
+				if len(nameParts) > 1 {
+					// Имя без префиксов
+					name = nameParts[len(nameParts)-1]
+				}
+
+				if isNew {
+					names[idx] = name
+				}
 				vals[idx] = val
 				continue
 			}
@@ -175,8 +175,9 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 			if isNew {
 				jbPairs = append(jbPairs,
 					&JbPair{
-						Idx:    idx,
-						Format: fmt.Sprintf("'%s',$%%d::%s", name, tp),
+						Idx:       idx,
+						Format:    fmt.Sprintf("'%s',$%%d::%s", fieldInfo.JbName, fieldInfo.JbType),
+						FieldInfo: fieldInfo,
 					},
 				)
 			}
@@ -196,12 +197,12 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 
 		for j, v := range rows[i] {
 			if v == nil {
-				if defVal, exists := fields.defVals[names[j]]; exists {
-					rows[i][j] = defVal
-				}
+				rows[i][j] = fieldsInfo[j].DefVal
 			}
 		}
 	}
+
+	sort.Sort(jbPairs)
 
 	return
 }
@@ -209,10 +210,38 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func MakeFieldsList(o any) (fields *FieldsList, err error) {
-	return makeFieldsList(o, "", "")
+	fields, err = makeFieldsList(nil, o, "", "")
+	if err != nil {
+		return
+	}
+
+	ln := len(fields.byJsonName)
+	if ln == 0 {
+		return
+	}
+
+	fields.allDbNames = make([]string, 0, ln)
+	fields.allDbSelect = make([]string, 0, ln)
+	jbFields := make([]string, 0, ln)
+
+	for _, f := range fields.byJsonName {
+		if f.DbName != "" {
+			fields.allDbNames = append(fields.allDbNames, f.DbName)
+			fields.allDbSelect = append(fields.allDbSelect, f.DbSelect)
+		}
+
+		if f.JbName != "" && (f.Parent == nil || f.Parent.JbType != "jsonb") {
+			s := fmt.Sprintf("%s %s", f.JbName, f.JbType)
+			jbFields = append(jbFields, s)
+		}
+	}
+
+	fields.jbFieldsStr = strings.Join(jbFields, ",")
+
+	return
 }
 
-func makeFieldsList(o any, path string, jPath string) (fields *FieldsList, err error) {
+func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields *FieldsList, err error) {
 	if path != "" {
 		path += "."
 	}
@@ -233,145 +262,140 @@ func makeFieldsList(o any, path string, jPath string) (fields *FieldsList, err e
 
 	n := t.NumField()
 	fields = &FieldsList{
-		json:       make(misc.StringMap, n),
-		json2db:    make(misc.StringMap, n),
-		all:        make([]string, 0, n),
-		allSrc:     make([]string, 0, n),
-		regular:    make([]string, 0, n),
-		jbFull:     make(misc.StringMap, n),
-		jbShort:    make(misc.StringMap, n),
-		defVals:    make(misc.InterfaceMap, n),
-		typeByDB:   make(map[string]reflect.Type, n),
-		typeByJson: make(map[string]reflect.Type, n),
+		byJsonName: make(map[string]*FieldInfo, n),
+		byDbName:   make(map[string]*FieldInfo, n),
 	}
 
 	for i := 0; i < n; i++ {
-		sf := t.Field(i)
+		var fieldInfo *FieldInfo
+		fieldInfo, err = func() (fieldInfo *FieldInfo, err error) {
+			sf := t.Field(i)
 
-		if !sf.IsExported() {
-			continue
-		}
-
-		t := sf.Type
-		if t.Kind() == reflect.Pointer {
-			t = t.Elem()
-		}
-
-		name := misc.StructFieldName(&sf, "db")
-
-		if name == "-" {
-			continue
-		}
-
-		if name != "" {
-			field := name
-			as := name
-
-			jName := jPath + misc.StructFieldName(&sf, "json")
-			fields.json[jName] = path + sf.Name
-			fields.json2db[jName] = name
-			fields.typeByDB[name] = misc.BaseType(t)
-			fields.typeByJson[jName] = fields.typeByDB[name]
-
-			v := reflect.New(fields.typeByDB[name]).Interface()
-			switch v.(type) {
-			case Duration, *Duration:
-				s := ""
-				v = &s
-			default:
+			if !sf.IsExported() {
+				return
 			}
 
-			defVal, defValExists := sf.Tag.Lookup("default")
-			if defValExists {
-				err = misc.Iface2IfacePtr(defVal, v)
-				if err != nil {
-					err = fmt.Errorf("%s(default): %s", name, err)
-					return
-				}
-
-				vv := reflect.ValueOf(v).Elem()
-				v = vv.Interface()
-
-				switch vv.Kind() {
-				case reflect.String:
-					v = fmt.Sprintf("'%s'", strings.Replace(v.(string), "'", "''", -1))
-				case reflect.Struct:
-					switch vv := v.(type) {
-					case time.Time:
-						v = fmt.Sprintf("'%s'", misc.Time2JSON(vv))
-					}
-				}
-
-				field = fmt.Sprintf("COALESCE(%s, %v)", name, v)
+			t := sf.Type
+			if t.Kind() == reflect.Pointer {
+				t = t.Elem()
 			}
 
-			fields.defVals[name] = v
-
-			s := fmt.Sprintf(`%s AS "%s"`, field, as)
-			fields.all = append(fields.all, s)
-			fields.allSrc = append(fields.allSrc, name)
+			name := misc.StructFieldName(&sf, "db")
+			if name == "-" {
+				return
+			}
 
 			tags := misc.StructFieldOpts(&sf, "db")
-			tp, ok := tags["jb"]
-			if !ok {
-				fields.regular = append(fields.regular, s)
-			} else {
-				if tp == "" {
-					tp = dbTpOf(t)
-				}
-				if tp != "" {
-					fields.jbFull[name] = tp
 
-					n := strings.Split(name, ".")
-					if len(n) > 1 {
-						name = n[len(n)-1]
+			fieldInfo = &FieldInfo{
+				Parent:    parent,
+				Type:      t, //misc.BaseType(t)
+				FieldName: path + sf.Name,
+				JsonName:  jPath + misc.StructFieldName(&sf, "json"),
+			}
+
+			if name != "" || len(tags) > 1 {
+				if name != "" {
+					field := name
+					as := name
+					fieldInfo.DbName = name
+
+					v := reflect.New(fieldInfo.Type).Interface()
+					switch v.(type) {
+					case Duration, *Duration:
+						s := ""
+						v = &s
+					default:
 					}
-					fields.jbShort[name] = tp
+
+					defVal, defValExists := sf.Tag.Lookup("default")
+					if defValExists {
+						err = misc.Iface2IfacePtr(defVal, v)
+						if err != nil {
+							err = fmt.Errorf("%s(default): %s", name, err)
+							return
+						}
+
+						vv := reflect.ValueOf(v).Elem()
+						v = vv.Interface()
+
+						switch vv.Kind() {
+						case reflect.String:
+							v = fmt.Sprintf("'%s'", strings.Replace(v.(string), "'", "''", -1))
+						case reflect.Struct:
+							switch vv := v.(type) {
+							case time.Time:
+								v = fmt.Sprintf("'%s'", misc.Time2JSON(vv))
+							}
+						}
+
+						field = fmt.Sprintf("COALESCE(%s, %v)", name, v)
+					}
+
+					fieldInfo.DbSelect = fmt.Sprintf(`%s AS "%s"`, field, as)
+					fieldInfo.DefVal = v
+				}
+
+				if tp, ok := tags["jb"]; ok {
+					if tp == "" {
+						tp = dbTpOf(t)
+					}
+
+					if tp != "" {
+						fieldInfo.JbType = tp
+
+						if container, ok := tags["container"]; ok {
+							fieldInfo.Container = container
+						}
+
+						fieldName, ok := tags["jbField"]
+						if !ok {
+							fieldName = name
+						}
+
+						if fieldName != "" {
+							n := strings.Split(fieldName, ".")
+							if len(n) > 1 {
+								fieldName = n[len(n)-1]
+							}
+							fieldInfo.JbName = fieldName
+						}
+					}
 				}
 			}
-			continue
-		}
 
-		if t.Kind() != reflect.Struct {
-			continue
-		}
+			if t.Kind() != reflect.Struct {
+				return
+			}
 
-		var subFields *FieldsList
-		subFields, err = makeFieldsList(reflect.New(t).Interface(), path+sf.Name, jPath+misc.StructFieldName(&sf, "json"))
+			var subFields *FieldsList
+			subFields, err = makeFieldsList(fieldInfo, reflect.New(t).Interface(), path+sf.Name, jPath+misc.StructFieldName(&sf, "json"))
+			if err != nil {
+				return
+			}
+
+			for k, v := range subFields.byJsonName {
+				fields.byJsonName[k] = v
+			}
+
+			for k, v := range subFields.byDbName {
+				fields.byDbName[k] = v
+			}
+
+			return
+		}()
+
 		if err != nil {
 			return
 		}
 
-		fields.all = append(fields.all, subFields.all...)
-		fields.allSrc = append(fields.allSrc, subFields.allSrc...)
-		fields.regular = append(fields.regular, subFields.regular...)
-
-		for k, v := range subFields.json {
-			fields.json[k] = v
-		}
-
-		for k, v := range subFields.json2db {
-			fields.json2db[k] = v
-		}
-
-		for k, v := range subFields.jbShort {
-			fields.jbShort[k] = v
-		}
-
-		for k, v := range subFields.jbFull {
-			fields.jbFull[k] = v
-		}
-
-		for k, v := range subFields.defVals {
-			fields.defVals[k] = v
-		}
-
-		for k, v := range subFields.typeByDB {
-			fields.typeByDB[k] = v
-		}
-
-		for k, v := range subFields.typeByJson {
-			fields.typeByJson[k] = v
+		if fieldInfo != nil && fieldInfo.FieldName != "" {
+			if fieldInfo.JsonName != "" {
+				fields.byJsonName[fieldInfo.JsonName] = fieldInfo
+			}
+			if fieldInfo.DbName != "" {
+				fields.byDbName[fieldInfo.DbName] = fieldInfo
+			}
 		}
 	}
 
@@ -386,7 +410,7 @@ func dbTpOf(t reflect.Type) string {
 		return "varchar"
 
 	case time.Time, *time.Time:
-		return "datetime"
+		return "timestamp"
 
 	default:
 		switch t.Kind() {
