@@ -45,6 +45,11 @@ type (
 	}
 )
 
+var (
+	typeTime     = reflect.TypeOf(time.Time{})
+	typeDuration = reflect.TypeOf(Duration(0))
+)
+
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func (d JbPairs) Len() int {
@@ -140,12 +145,13 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 
 			// Преобразуем значение в правильный тип
 
-			v := reflect.New(fieldInfo.Type).Interface()
-			switch v.(type) {
-			case Duration, *Duration:
+			var v any
+			switch fieldInfo.Type {
+			default:
+				v = reflect.New(fieldInfo.Type).Interface()
+			case typeDuration:
 				s := ""
 				v = &s
-			default:
 			}
 
 			e := misc.Iface2IfacePtr(val, v)
@@ -287,9 +293,16 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 
 			tags := misc.StructFieldOpts(&sf, "db")
 
+			switch t {
+			default:
+				t = misc.BaseType(t)
+			case typeDuration:
+				// keep
+			}
+
 			fieldInfo = &FieldInfo{
 				Parent:    parent,
-				Type:      t, //misc.BaseType(t)
+				Type:      t,
 				FieldName: path + sf.Name,
 				JsonName:  jPath + misc.StructFieldName(&sf, "json"),
 			}
@@ -300,12 +313,13 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 					as := name
 					fieldInfo.DbName = name
 
-					v := reflect.New(fieldInfo.Type).Interface()
-					switch v.(type) {
-					case Duration, *Duration:
+					var v any
+					switch fieldInfo.Type {
+					default:
+						v = reflect.New(fieldInfo.Type).Interface()
+					case typeDuration:
 						s := ""
 						v = &s
-					default:
 					}
 
 					defVal, defValExists := sf.Tag.Lookup("default")
@@ -365,6 +379,10 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 			}
 
 			if t.Kind() != reflect.Struct {
+				return
+			}
+
+			if t == typeTime {
 				return
 			}
 
