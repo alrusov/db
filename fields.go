@@ -20,6 +20,7 @@ type (
 		allDbSelect []string // все поля ["o.id AS \"o.id\"", "COALESCE(x.name, '') AS \"x.name\""]
 		jbFieldsStr string
 
+		byName     map[string]*FieldInfo // "Name"->...
 		byJsonName map[string]*FieldInfo // "name"->...
 		byDbName   map[string]*FieldInfo // "x.name"->...
 	}
@@ -221,7 +222,7 @@ func MakeFieldsList(o any) (fields *FieldsList, err error) {
 		return
 	}
 
-	ln := len(fields.byJsonName)
+	ln := len(fields.byName)
 	if ln == 0 {
 		return
 	}
@@ -230,7 +231,7 @@ func MakeFieldsList(o any) (fields *FieldsList, err error) {
 	fields.allDbSelect = make([]string, 0, ln)
 	jbFields := make([]string, 0, ln)
 
-	for _, f := range fields.byJsonName {
+	for _, f := range fields.byName {
 		if f.DbName != "" {
 			fields.allDbNames = append(fields.allDbNames, f.DbName)
 			fields.allDbSelect = append(fields.allDbSelect, f.DbSelect)
@@ -268,6 +269,7 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 
 	n := t.NumField()
 	fields = &FieldsList{
+		byName:     make(map[string]*FieldInfo, n),
 		byJsonName: make(map[string]*FieldInfo, n),
 		byDbName:   make(map[string]*FieldInfo, n),
 	}
@@ -392,6 +394,10 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				return
 			}
 
+			for k, v := range subFields.byName {
+				fields.byName[k] = v
+			}
+
 			for k, v := range subFields.byJsonName {
 				fields.byJsonName[k] = v
 			}
@@ -408,10 +414,11 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 		}
 
 		if fieldInfo != nil && fieldInfo.FieldName != "" {
-			if fieldInfo.JsonName != "" {
+			fields.byName[fieldInfo.FieldName] = fieldInfo
+			if fieldInfo.JsonName != "" && fieldInfo.JsonName != "-" {
 				fields.byJsonName[fieldInfo.JsonName] = fieldInfo
 			}
-			if fieldInfo.DbName != "" {
+			if fieldInfo.DbName != "" && fieldInfo.DbName != "-" {
 				fields.byDbName[fieldInfo.DbName] = fieldInfo
 			}
 		}
