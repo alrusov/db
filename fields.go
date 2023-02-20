@@ -447,10 +447,10 @@ func dbTpOf(t reflect.Type) string {
 
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			return "int"
+			return "bigint"
 
 		case reflect.Float32, reflect.Float64:
-			return "float"
+			return "float8"
 
 		case reflect.String:
 			return "varchar"

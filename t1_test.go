@@ -283,13 +283,13 @@ func TestJbPairs2String(t *testing.T) {
 
 	maxFuncPairsCount = 1
 
-	expected := "(jsonb_build_object('x',$4::int)||jsonb_build_object('l1_1',(jsonb_build_object('v1_1_1',$0::int)||jsonb_build_object('v1_1_2',$1::varchar)::jsonb))||jsonb_build_object('l1_2',(jsonb_build_object('v1_2_1',$2::int)||jsonb_build_object('v1_2_2',$3::varchar)::jsonb))::jsonb)"
+	expected := "(jsonb_build_object('x',$4::bigint)||jsonb_build_object('l1_1',(jsonb_build_object('v1_1_1',$0::bigint)||jsonb_build_object('v1_1_2',$1::varchar)::jsonb))||jsonb_build_object('l1_2',(jsonb_build_object('v1_2_1',$2::bigint)||jsonb_build_object('v1_2_2',$3::varchar)::jsonb))::jsonb)"
 	s := jbp.String(PatternTypeInsert)
 	if !equal(s, expected) {
 		t.Errorf("%d.insert: got\n%s\nexpected\n%s\n", maxFuncPairsCount, s, expected)
 	}
 
-	expected = "(jsonb_build_object('x',$4::int)||jsonb_build_object('l1_1',COALESCE(o.j->'l1_1', '{}'::jsonb)||(jsonb_build_object('v1_1_1',$0::int)||jsonb_build_object('v1_1_2',$1::varchar)::jsonb))||jsonb_build_object('l1_2',COALESCE(o.j->'l1_2', '{}'::jsonb)||(jsonb_build_object('v1_2_1',$2::int)||jsonb_build_object('v1_2_2',$3::varchar)::jsonb))::jsonb)"
+	expected = "(jsonb_build_object('x',$4::bigint)||jsonb_build_object('l1_1',COALESCE(o.j->'l1_1', '{}'::jsonb)||(jsonb_build_object('v1_1_1',$0::bigint)||jsonb_build_object('v1_1_2',$1::varchar)::jsonb))||jsonb_build_object('l1_2',COALESCE(o.j->'l1_2', '{}'::jsonb)||(jsonb_build_object('v1_2_1',$2::bigint)||jsonb_build_object('v1_2_2',$3::varchar)::jsonb))::jsonb)"
 	s = jbp.String(PatternTypeUpdate)
 	if !equal(s, expected) {
 		t.Errorf("%d.update: got\n%s\nexpected\n%s\n", maxFuncPairsCount, s, expected)
@@ -297,13 +297,13 @@ func TestJbPairs2String(t *testing.T) {
 
 	maxFuncPairsCount = 2
 
-	expected = "(jsonb_build_object('x',$4::int,'l1_1',(jsonb_build_object('v1_1_1',$0::int,'v1_1_2',$1::varchar)::jsonb))||jsonb_build_object('l1_2',(jsonb_build_object('v1_2_1',$2::int,'v1_2_2',$3::varchar)::jsonb))::jsonb)"
+	expected = "(jsonb_build_object('x',$4::bigint,'l1_1',(jsonb_build_object('v1_1_1',$0::bigint,'v1_1_2',$1::varchar)::jsonb))||jsonb_build_object('l1_2',(jsonb_build_object('v1_2_1',$2::bigint,'v1_2_2',$3::varchar)::jsonb))::jsonb)"
 	s = jbp.String(PatternTypeInsert)
 	if !equal(s, expected) {
 		t.Errorf("%d.insert: got\n%s\nexpected\n%s\n", maxFuncPairsCount, s, expected)
 	}
 
-	expected = "(jsonb_build_object('x',$4::int,'l1_1',COALESCE(o.j->'l1_1', '{}'::jsonb)||(jsonb_build_object('v1_1_1',$0::int,'v1_1_2',$1::varchar)::jsonb))||jsonb_build_object('l1_2',COALESCE(o.j->'l1_2', '{}'::jsonb)||(jsonb_build_object('v1_2_1',$2::int,'v1_2_2',$3::varchar)::jsonb))::jsonb)"
+	expected = "(jsonb_build_object('x',$4::bigint,'l1_1',COALESCE(o.j->'l1_1', '{}'::jsonb)||(jsonb_build_object('v1_1_1',$0::bigint,'v1_1_2',$1::varchar)::jsonb))||jsonb_build_object('l1_2',COALESCE(o.j->'l1_2', '{}'::jsonb)||(jsonb_build_object('v1_2_1',$2::bigint,'v1_2_2',$3::varchar)::jsonb))::jsonb)"
 	s = jbp.String(PatternTypeUpdate)
 	if !equal(s, expected) {
 		t.Errorf("%d.update: got\n%s\nexpected\n%s\n", maxFuncPairsCount, s, expected)
@@ -311,13 +311,13 @@ func TestJbPairs2String(t *testing.T) {
 
 	maxFuncPairsCount = 50
 
-	expected = "(jsonb_build_object('x',$4::int,'l1_1',(jsonb_build_object('v1_1_1',$0::int,'v1_1_2',$1::varchar)::jsonb),'l1_2',(jsonb_build_object('v1_2_1',$2::int,'v1_2_2',$3::varchar)::jsonb))::jsonb)"
+	expected = "(jsonb_build_object('x',$4::bigint,'l1_1',(jsonb_build_object('v1_1_1',$0::bigint,'v1_1_2',$1::varchar)::jsonb),'l1_2',(jsonb_build_object('v1_2_1',$2::bigint,'v1_2_2',$3::varchar)::jsonb))::jsonb)"
 	s = jbp.String(PatternTypeInsert)
 	if !equal(s, expected) {
 		t.Errorf("%d.insert: got\n%s\nexpected\n%s\n", maxFuncPairsCount, s, expected)
 	}
 
-	expected = "(jsonb_build_object('x',$4::int,'l1_1',COALESCE(o.j->'l1_1', '{}'::jsonb)||(jsonb_build_object('v1_1_1',$0::int,'v1_1_2',$1::varchar)::jsonb),'l1_2',COALESCE(o.j->'l1_2', '{}'::jsonb)||(jsonb_build_object('v1_2_1',$2::int,'v1_2_2',$3::varchar)::jsonb))::jsonb)"
+	expected = "(jsonb_build_object('x',$4::bigint,'l1_1',COALESCE(o.j->'l1_1', '{}'::jsonb)||(jsonb_build_object('v1_1_1',$0::bigint,'v1_1_2',$1::varchar)::jsonb),'l1_2',COALESCE(o.j->'l1_2', '{}'::jsonb)||(jsonb_build_object('v1_2_1',$2::bigint,'v1_2_2',$3::varchar)::jsonb))::jsonb)"
 	s = jbp.String(PatternTypeUpdate)
 	if !equal(s, expected) {
 		t.Errorf("%d.update: got\n%s\nexpected\n%s\n", maxFuncPairsCount, s, expected)
