@@ -127,6 +127,10 @@ func (a *SubstArg) Value() any {
 	return a.value
 }
 
+func (a *SubstArg) SetValue(v any) {
+	a.value = v
+}
+
 func (a *SubstArg) String() string {
 	return fmt.Sprintf("{SubstArg(%s)=`%v`}", a.name, a.value)
 }
