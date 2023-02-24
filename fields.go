@@ -36,6 +36,7 @@ type (
 		JbName    string       // "name"
 		JbType    string       // "varchar"
 		DefVal    any          // 12345
+		Tags      misc.StringMap
 	}
 
 	JbPairs []*JbPair
@@ -180,13 +181,12 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 			// jb поле
 
 			if isNew {
-				jbPairs = append(jbPairs,
-					&JbPair{
-						Idx:       idx,
-						Format:    fmt.Sprintf("'%s',$%%d::%s", fieldInfo.JbName, fieldInfo.JbType),
-						FieldInfo: fieldInfo,
-					},
-				)
+				pair := &JbPair{
+					Idx:       idx,
+					Format:    fmt.Sprintf("'%s',$%%d::%s", fieldInfo.JbName, fieldInfo.JbType),
+					FieldInfo: fieldInfo,
+				}
+				jbPairs = append(jbPairs, pair)
 			}
 
 			valsJb[idx] = val
@@ -293,8 +293,6 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				return
 			}
 
-			tags := misc.StructFieldOpts(&sf, "db")
-
 			switch t {
 			default:
 				t = misc.BaseType(t)
@@ -307,9 +305,10 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				Type:      t,
 				FieldName: path + sf.Name,
 				JsonName:  jPath + misc.StructFieldName(&sf, "json"),
+				Tags:      misc.StructFieldOpts(&sf, "db"),
 			}
 
-			if name != "" || len(tags) > 1 {
+			if name != "" || len(fieldInfo.Tags) > 1 {
 				if name != "" {
 					field := name
 					as := name
@@ -352,7 +351,7 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 					fieldInfo.DefVal = v
 				}
 
-				if tp, ok := tags["jb"]; ok {
+				if tp, ok := fieldInfo.Tags["jb"]; ok {
 					if tp == "" {
 						tp = dbTpOf(t)
 					}
@@ -360,11 +359,11 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 					if tp != "" {
 						fieldInfo.JbType = tp
 
-						if container, ok := tags["container"]; ok {
+						if container, ok := fieldInfo.Tags["container"]; ok {
 							fieldInfo.Container = container
 						}
 
-						fieldName, ok := tags["jbField"]
+						fieldName, ok := fieldInfo.Tags["jbField"]
 						if !ok {
 							fieldName = name
 						}
