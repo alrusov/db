@@ -288,7 +288,7 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				t = t.Elem()
 			}
 
-			name := misc.StructFieldName(&sf, "db")
+			name := misc.StructTagName(&sf, "db")
 			if name == "-" {
 				return
 			}
@@ -304,8 +304,8 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				Parent:    parent,
 				Type:      t,
 				FieldName: path + sf.Name,
-				JsonName:  jPath + misc.StructFieldName(&sf, "json"),
-				Tags:      misc.StructFieldOpts(&sf, "db"),
+				JsonName:  jPath + misc.StructTagName(&sf, "json"),
+				Tags:      misc.StructTagOpts(&sf, "db"),
 			}
 
 			if name != "" || len(fieldInfo.Tags) > 1 {
@@ -388,7 +388,7 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 			}
 
 			var subFields *FieldsList
-			subFields, err = makeFieldsList(fieldInfo, reflect.New(t).Interface(), path+sf.Name, jPath+misc.StructFieldName(&sf, "json"))
+			subFields, err = makeFieldsList(fieldInfo, reflect.New(t).Interface(), path+sf.Name, jPath+misc.StructTagName(&sf, "json"))
 			if err != nil {
 				return
 			}
