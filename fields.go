@@ -324,7 +324,9 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 					}
 
 					defVal, defValExists := sf.Tag.Lookup("default")
-					if defValExists {
+					if !defValExists {
+						v = nil
+					} else {
 						err = misc.Iface2IfacePtr(defVal, v)
 						if err != nil {
 							err = fmt.Errorf("%s(default): %s", name, err)
