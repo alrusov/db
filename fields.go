@@ -390,7 +390,15 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 			}
 
 			var subFields *FieldsList
-			subFields, err = makeFieldsList(fieldInfo, reflect.New(t).Interface(), path+sf.Name, jPath+misc.StructTagName(&sf, "json"))
+
+			subPath := path
+			subjPath := jPath
+			if !sf.Anonymous {
+				subPath += sf.Name
+				subjPath += misc.StructTagName(&sf, "json")
+			}
+
+			subFields, err = makeFieldsList(fieldInfo, reflect.New(t).Interface(), subPath, subjPath)
 			if err != nil {
 				return
 			}
