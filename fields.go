@@ -86,8 +86,16 @@ func (fields *FieldsList) JbFieldsStr() string {
 	return fields.jbFieldsStr
 }
 
+func (fields *FieldsList) ByName() map[string]*FieldInfo {
+	return fields.byName
+}
+
 func (fields *FieldsList) ByJsonName() map[string]*FieldInfo {
 	return fields.byJsonName
+}
+
+func (fields *FieldsList) ByDbName() map[string]*FieldInfo {
+	return fields.byDbName
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
