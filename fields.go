@@ -37,6 +37,7 @@ type (
 		JbType    string       // "varchar"
 		DefVal    any          // 12345
 		Tags      misc.StringMap
+		Skipped   bool
 	}
 
 	JbPairs []*JbPair
@@ -127,6 +128,10 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 		for fullName, val := range row {
 			fieldInfo, exists := fields.byDbName[fullName]
 			if !exists {
+				continue
+			}
+
+			if fieldInfo.Skipped {
 				continue
 			}
 
@@ -240,6 +245,10 @@ func MakeFieldsList(o any) (fields *FieldsList, err error) {
 	jbFields := make([]string, 0, ln)
 
 	for _, f := range fields.byName {
+		if f.Skipped {
+			continue
+		}
+
 		if f.DbName != "" {
 			fields.allDbNames = append(fields.allDbNames, f.DbName)
 			fields.allDbSelect = append(fields.allDbSelect, f.DbSelect)
@@ -359,6 +368,10 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 
 					fieldInfo.DbSelect = fmt.Sprintf(`%s AS "%s"`, field, as)
 					fieldInfo.DefVal = v
+				}
+
+				if _, ok := fieldInfo.Tags["SKIP"]; ok {
+					fieldInfo.Skipped = true
 				}
 
 				if tp, ok := fieldInfo.Tags["jb"]; ok {
