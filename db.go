@@ -82,6 +82,8 @@ const (
 var (
 	Log = log.NewFacility("db") // Log facility
 
+	disabled = false
+
 	lastID uint64
 
 	knownCfg *Config
@@ -99,6 +101,10 @@ func init() {
 
 // Инициализация
 func initModule(appCfg any, h any) (err error) {
+	if disabled {
+		return
+	}
+
 	if knownCfg != nil {
 		err = knownCfg.ConnectAll()
 		if err != nil {
@@ -108,6 +114,16 @@ func initModule(appCfg any, h any) (err error) {
 
 	Log.Message(log.INFO, "Initialized")
 	return
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+func Disable() {
+	disabled = true
+}
+
+func Disabled() bool {
+	return disabled
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
