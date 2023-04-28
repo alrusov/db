@@ -26,18 +26,19 @@ type (
 	}
 
 	FieldInfo struct {
-		Parent    *FieldInfo
-		Type      reflect.Type // reflect.TypeOf("")
-		Container string       // "config"
-		FieldName string       // "Name"
-		JsonName  string       // "name"
-		DbName    string       // "x.name"
-		DbSelect  string       // "COALESCE(x.name, '') AS \"x.name\""
-		JbName    string       // "name"
-		JbType    string       // "varchar"
-		DefVal    any          // 12345
-		Tags      misc.StringMap
-		Skipped   bool
+		Parent      *FieldInfo
+		Type        reflect.Type // reflect.TypeOf("")
+		Container   string       // "config"
+		FieldName   string       // "Name"
+		JsonName    string       // "name"
+		DbName      string       // "x.name"
+		CleanDbName string       // "name"
+		DbSelect    string       // "COALESCE(x.name, '') AS \"x.name\""
+		JbName      string       // "name"
+		JbType      string       // "varchar"
+		DefVal      any          // 12345
+		Tags        misc.StringMap
+		Skipped     bool
 	}
 
 	JbPairs []*JbPair
@@ -318,11 +319,17 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 			}
 
 			fieldInfo = &FieldInfo{
-				Parent:    parent,
-				Type:      t,
-				FieldName: path + sf.Name,
-				JsonName:  jPath + misc.StructTagName(&sf, "json"),
-				Tags:      misc.StructTagOpts(&sf, "db"),
+				Parent:      parent,
+				Type:        t,
+				FieldName:   path + sf.Name,
+				CleanDbName: name,
+				JsonName:    jPath + misc.StructTagName(&sf, "json"),
+				Tags:        misc.StructTagOpts(&sf, "db"),
+			}
+
+			n := strings.Split(name, ".")
+			if len(n) > 1 {
+				fieldInfo.CleanDbName = n[len(n)-1]
 			}
 
 			if name != "" || len(fieldInfo.Tags) > 1 {
@@ -397,6 +404,7 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 								fieldName = n[len(n)-1]
 							}
 							fieldInfo.JbName = fieldName
+							fieldInfo.CleanDbName = fieldName
 						}
 					}
 				}
