@@ -410,6 +410,11 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				}
 			}
 
+			clean, ok := fieldInfo.Tags["clean"]
+			if ok {
+				fieldInfo.CleanDbName = clean
+			}
+
 			if t.Kind() != reflect.Struct {
 				return
 			}
