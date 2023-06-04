@@ -20,9 +20,10 @@ type (
 		allDbSelect []string // все поля ["o.id AS \"o.id\"", "COALESCE(x.name, '') AS \"x.name\""]
 		jbFieldsStr string
 
-		byName     map[string]*FieldInfo // "Name"->...
-		byJsonName map[string]*FieldInfo // "name"->...
-		byDbName   map[string]*FieldInfo // "x.name"->...
+		byName        FieldsInfoMap // "Name"->...
+		byJsonName    FieldsInfoMap // "name"->...
+		byDbName      FieldsInfoMap // "x.name"->...
+		byCleanDbName FieldsInfoMap // "name"->...
 	}
 
 	FieldInfo struct {
@@ -40,6 +41,8 @@ type (
 		Tags        misc.StringMap
 		Skipped     bool
 	}
+
+	FieldsInfoMap map[string]*FieldInfo
 
 	JbPairs []*JbPair
 	JbPair  struct {
@@ -88,16 +91,20 @@ func (fields *FieldsList) JbFieldsStr() string {
 	return fields.jbFieldsStr
 }
 
-func (fields *FieldsList) ByName() map[string]*FieldInfo {
+func (fields *FieldsList) ByName() FieldsInfoMap {
 	return fields.byName
 }
 
-func (fields *FieldsList) ByJsonName() map[string]*FieldInfo {
+func (fields *FieldsList) ByJsonName() FieldsInfoMap {
 	return fields.byJsonName
 }
 
-func (fields *FieldsList) ByDbName() map[string]*FieldInfo {
+func (fields *FieldsList) ByDbName() FieldsInfoMap {
 	return fields.byDbName
+}
+
+func (fields *FieldsList) ByCleanDbName() FieldsInfoMap {
+	return fields.byCleanDbName
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
@@ -287,9 +294,10 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 
 	n := t.NumField()
 	fields = &FieldsList{
-		byName:     make(map[string]*FieldInfo, n),
-		byJsonName: make(map[string]*FieldInfo, n),
-		byDbName:   make(map[string]*FieldInfo, n),
+		byName:        make(FieldsInfoMap, n),
+		byJsonName:    make(FieldsInfoMap, n),
+		byDbName:      make(FieldsInfoMap, n),
+		byCleanDbName: make(FieldsInfoMap, n),
 	}
 
 	for i := 0; i < n; i++ {
@@ -449,6 +457,10 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				fields.byDbName[k] = v
 			}
 
+			for k, v := range subFields.byCleanDbName {
+				fields.byCleanDbName[k] = v
+			}
+
 			return
 		}()
 
@@ -463,6 +475,7 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 			}
 			if fieldInfo.DbName != "" && fieldInfo.DbName != "-" {
 				fields.byDbName[fieldInfo.DbName] = fieldInfo
+				fields.byCleanDbName[fieldInfo.CleanDbName] = fieldInfo
 			}
 		}
 	}
