@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.0
-	github.com/alrusov/config v0.1.55
+	github.com/alrusov/config v0.1.56
 	github.com/alrusov/initializer v0.1.2
 	github.com/alrusov/jsonw v0.1.3
 	github.com/alrusov/loadavg v0.1.5

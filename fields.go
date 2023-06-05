@@ -475,6 +475,8 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 			}
 			if fieldInfo.DbName != "" && fieldInfo.DbName != "-" {
 				fields.byDbName[fieldInfo.DbName] = fieldInfo
+			}
+			if fieldInfo.CleanDbName != "" {
 				fields.byCleanDbName[fieldInfo.CleanDbName] = fieldInfo
 			}
 		}
