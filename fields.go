@@ -314,11 +314,6 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				t = t.Elem()
 			}
 
-			name := misc.StructTagName(&sf, "db")
-			if name == "-" {
-				return
-			}
-
 			switch t {
 			default:
 				t = misc.BaseType(t)
@@ -327,17 +322,26 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 			}
 
 			fieldInfo = &FieldInfo{
-				Parent:      parent,
-				Type:        t,
-				FieldName:   path + sf.Name,
-				CleanDbName: name,
-				JsonName:    jPath + misc.StructTagName(&sf, "json"),
-				Tags:        misc.StructTagOpts(&sf, "db"),
+				Parent:    parent,
+				Type:      t,
+				FieldName: path + sf.Name,
+				JsonName:  jPath + misc.StructTagName(&sf, "json"),
+				Tags:      misc.StructTagOpts(&sf, "db"),
 			}
 
-			n := strings.Split(name, ".")
-			if len(n) > 1 {
-				fieldInfo.CleanDbName = n[len(n)-1]
+			clean, ok := fieldInfo.Tags["clean"]
+			if ok {
+				fieldInfo.CleanDbName = clean
+			}
+
+			name := misc.StructTagName(&sf, "db")
+			if name == "-" {
+				return
+			}
+
+			if fieldInfo.CleanDbName == "" {
+				names := strings.Split(name, ".")
+				fieldInfo.CleanDbName = names[len(names)-1]
 			}
 
 			if name != "" || len(fieldInfo.Tags) > 1 {
@@ -412,15 +416,12 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 								fieldName = n[len(n)-1]
 							}
 							fieldInfo.JbName = fieldName
-							fieldInfo.CleanDbName = fieldName
+							if fieldInfo.CleanDbName == name && fieldName != name {
+								fieldInfo.CleanDbName = fieldName
+							}
 						}
 					}
 				}
-			}
-
-			clean, ok := fieldInfo.Tags["clean"]
-			if ok {
-				fieldInfo.CleanDbName = clean
 			}
 
 			if t.Kind() != reflect.Struct {
