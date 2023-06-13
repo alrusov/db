@@ -518,3 +518,41 @@ func dbTpOf(t reflect.Type) string {
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
+
+func (fields FieldsInfoMap) Field2Name(fieldName string) (name string, err error) {
+	parts := strings.SplitN(fieldName, ".", 2)
+
+	src := ""
+	field := parts[0]
+	if len(parts) > 1 {
+		src = field
+		field = parts[1]
+	}
+
+	defer func() {
+		if name == "" {
+			err = fmt.Errorf(`undefined field "%s"`, fieldName)
+		}
+	}()
+
+	fi, exists := fields[field]
+	if !exists {
+		return
+	}
+
+	switch src {
+	case "",
+		"db":
+		name = fi.DbName
+	case "clean":
+		name = fi.CleanDbName
+	case "json":
+		name = fi.JsonName
+	case "jb":
+		name = fi.JbName
+	}
+
+	return
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
