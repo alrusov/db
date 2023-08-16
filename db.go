@@ -58,18 +58,26 @@ type (
 )
 
 const (
-	SubstJbFields  = "JB"
-	SubstExtra     = "EXTRA"
-	SubstExtraFrom = "EXTRA_FROM"
+	SubstNames         = "NAMES"
+	SubstNamesPreComma = "NAMES_PRE_COMMA"
+	SubstVals          = "VALS"
+	SubstValsPreComma  = "VALS_PRE_COMMA"
+	SubstPairs         = "PAIRS"
+	SubstPairsPreComma = "PAIRS_PRE_COMMA"
+	SubstJbFields      = "JB"
+	SubstExtra         = "EXTRA"
+	SubstExtraFrom     = "EXTRA_FROM"
+	SubstExtraFullFrom = "EXTRA_FULL_FROM"
 
-	PatternNames         = "@NAMES@"
-	PatternNamesPreComma = "@NAMES_PRE_COMMA@"
-	PatternVals          = "@VALS@"
-	PatternValsPreComma  = "@VALS_PRE_COMMA@"
-	PatternPairs         = "@PAIRS@"
-	PatternPairsPreComma = "@PAIRS_PRE_COMMA@"
+	PatternNames         = "@" + SubstNames + "@"
+	PatternNamesPreComma = "@" + SubstNamesPreComma + "@"
+	PatternVals          = "@" + SubstVals + "@"
+	PatternValsPreComma  = "@" + SubstValsPreComma + "@"
+	PatternPairs         = "@" + SubstPairs + "@"
+	PatternPairsPreComma = "@" + SubstPairsPreComma + "@"
 	PatternExtra         = "@" + SubstExtra + "@"
 	PatternExtraFrom     = "@" + SubstExtraFrom + "@"
+	PatternExtraFullFrom = "@" + SubstExtraFullFrom + "@"
 )
 
 const (
@@ -841,8 +849,9 @@ func doSubst(q string, tp PatternType, vars []any) (newQ string, newVars []any, 
 		}
 	}
 
-	newQ = strings.ReplaceAll(newQ, PatternExtra, "")     // if not substituted before
-	newQ = strings.ReplaceAll(newQ, PatternExtraFrom, "") // if not substituted before
+	newQ = strings.ReplaceAll(newQ, PatternExtra, "")         // if not substituted before
+	newQ = strings.ReplaceAll(newQ, PatternExtraFrom, "")     // if not substituted before
+	newQ = strings.ReplaceAll(newQ, PatternExtraFullFrom, "") // if not substituted before
 
 	return
 }
