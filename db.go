@@ -17,6 +17,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jmoiron/sqlx"
+	"github.com/jmoiron/sqlx/reflectx"
 
 	"github.com/alrusov/initializer"
 	"github.com/alrusov/log"
@@ -58,6 +59,10 @@ type (
 )
 
 const (
+	TagDB    = "db"
+	TagDBAlt = "dbAlt"
+
+	SubstTable         = "TABLE"
 	SubstNames         = "NAMES"
 	SubstNamesPreComma = "NAMES_PRE_COMMA"
 	SubstVals          = "VALS"
@@ -89,6 +94,8 @@ const (
 
 var (
 	Log = log.NewFacility("db") // Log facility
+
+	altTagsEnabled = false
 
 	disabled = false
 
@@ -221,6 +228,23 @@ func SetMockCallback(f MockCallback) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
+func EnableAltTags() {
+	altTagsEnabled = true
+}
+
+func IsAltTagsEnabled() bool {
+	return altTagsEnabled
+}
+
+func Tag() string {
+	if altTagsEnabled {
+		return TagDBAlt
+	}
+
+	return TagDB
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
 // Сrooked workaround for the mock NamedArg with slice problem
 
 type mockBlackHole struct{}
@@ -262,6 +286,10 @@ func (db *DB) Connect() (doRetry bool, err error) {
 	err = newStat(db.Name)
 	if err != nil {
 		return
+	}
+
+	if altTagsEnabled {
+		conn.Mapper = reflectx.NewMapperFunc(TagDBAlt, strings.ToLower)
 	}
 
 	db.conn = conn

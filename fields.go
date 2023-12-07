@@ -223,11 +223,13 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 		rows[i] = rows[i][0:currIdx]
 		rows[i] = append(rows[i], rowsJb[i][:currIdxJb]...)
 
-		for j, v := range rows[i] {
-			if v == nil {
-				rows[i][j] = fieldsInfo[j].DefVal
+		/*
+			for j, v := range rows[i] {
+				if v == nil {
+					rows[i][j] = fieldsInfo[j].DefVal
+				}
 			}
-		}
+		*/
 	}
 
 	sort.Sort(jbPairs)
@@ -321,12 +323,14 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				// keep
 			}
 
+			tags := misc.StructTagOpts(&sf, Tag())
+
 			fieldInfo = &FieldInfo{
 				Parent:    parent,
 				Type:      t,
 				FieldName: path + sf.Name,
 				JsonName:  jPath + misc.StructTagName(&sf, "json"),
-				Tags:      misc.StructTagOpts(&sf, "db"),
+				Tags:      tags,
 			}
 
 			clean, ok := fieldInfo.Tags["clean"]
@@ -334,7 +338,7 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				fieldInfo.CleanDbName = clean
 			}
 
-			name := misc.StructTagName(&sf, "db")
+			name := tags[""]
 			if name == "-" {
 				return
 			}
