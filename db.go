@@ -56,6 +56,11 @@ type (
 	Bulk [][]any
 
 	MockCallback func(db *DB, mock sqlmock.Sqlmock, q string, v []any) (err error)
+
+	Error struct {
+		message string
+		parent  error
+	}
 )
 
 const (
@@ -129,6 +134,33 @@ func initModule(appCfg any, h any) (err error) {
 
 	Log.Message(log.INFO, "Initialized")
 	return
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+func NewError(parentError error, msg string, params ...any) (e *Error) {
+	if parentError != nil && msg == "" {
+		msg = parentError.Error()
+	} else {
+		msg = fmt.Sprintf(msg, params...)
+	}
+
+	return &Error{
+		message: msg,
+		parent:  parentError,
+	}
+}
+
+func (e *Error) Error() string {
+	return e.message
+}
+
+func (e *Error) String() string {
+	return e.message
+}
+
+func (e *Error) Parent() error {
+	return e.parent
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
@@ -258,6 +290,12 @@ func (bh mockBlackHole) ConvertValue(v any) (driver.Value, error) {
 func (db *DB) Connect() (doRetry bool, err error) {
 	doRetry = true
 
+	defer func() {
+		if err != nil {
+			err = NewError(err, "")
+		}
+	}()
+
 	var conn *sqlx.DB
 	var mock sqlmock.Sqlmock
 
@@ -357,7 +395,7 @@ func (c Config) ConnectAll() (err error) {
 func GetDB(dbName string) (db *DB, err error) {
 	db, exists := (*knownCfg)[dbName]
 	if !exists {
-		err = fmt.Errorf("unknown database %s", dbName)
+		err = NewError(nil, "unknown database %s", dbName)
 		return
 	}
 
@@ -375,7 +413,7 @@ func GetConn(dbName string) (conn *sqlx.DB, err error) {
 	conn = db.conn
 
 	if conn == nil {
-		err = fmt.Errorf("database %s is not connected", dbName)
+		err = NewError(nil, "database %s is not connected", dbName)
 		return
 
 	}
@@ -388,7 +426,7 @@ func GetConn(dbName string) (conn *sqlx.DB, err error) {
 func (db *DB) GetQuery(queryName string) (q string, err error) {
 	q, exists := db.Queries[queryName]
 	if !exists {
-		err = fmt.Errorf("query %s.%s not found", db.Name, queryName)
+		err = NewError(nil, "query %s.%s not found", db.Name, queryName)
 		return
 	}
 
@@ -415,7 +453,7 @@ func (db *DB) QueryWithMock(mock MockCallback, dest any, queryName string, field
 
 	defer func() {
 		if err != nil {
-			err = fmt.Errorf("%s: %s", queryName, err)
+			err = NewError(err, "%s: %s", queryName, err)
 		}
 	}()
 
@@ -615,17 +653,17 @@ func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldI
 func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
 	t0 := misc.NowUnixNano()
 
+	defer func() {
+		if err != nil {
+			err = NewError(err, "%s: %s", queryName, err)
+		}
+	}()
+
 	if db.mock == nil {
 		mock = nil
 	} else if mock == nil {
 		mock = mockCallback
 	}
-
-	defer func() {
-		if err != nil {
-			err = fmt.Errorf("%s: %s", queryName, err)
-		}
-	}()
 
 	db.statBegin(true)
 	defer func() {
