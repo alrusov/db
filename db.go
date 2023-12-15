@@ -46,6 +46,13 @@ type (
 		mock sqlmock.Sqlmock
 	}
 
+	Result struct {
+		ids      []int64
+		rows     int64
+		errors   []error
+		hasError bool
+	}
+
 	PatternType int
 
 	SubstArg struct {
@@ -161,6 +168,52 @@ func (e *Error) String() string {
 
 func (e *Error) Parent() error {
 	return e.parent
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+func (r *Result) Add(sqlResult sql.Result, err error) {
+	r.errors = append(r.errors, err) // with nils
+	if err != nil {
+		r.hasError = true
+	}
+
+	if sqlResult == nil {
+		r.ids = append(r.ids, 0)
+		if err == nil {
+			r.rows++
+		}
+		return
+	}
+
+	id, _ := sqlResult.LastInsertId()
+	r.ids = append(r.ids, id) // with 0
+
+	n, err := sqlResult.RowsAffected()
+	if err == nil {
+		r.rows += n
+	}
+}
+
+func (r *Result) LastInsertId() (int64, error) {
+	ln := len(r.ids)
+	if ln == 0 {
+		return 0, nil
+	}
+
+	return r.ids[ln-1], nil
+}
+
+func (r *Result) RowsAffected() (int64, error) {
+	return r.rows, nil
+}
+
+func (r *Result) Errors() []error {
+	return r.errors
+}
+
+func (r *Result) HasError() bool {
+	return r.hasError
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
@@ -511,7 +564,7 @@ func (db *DB) QueryWithMock(mock MockCallback, dest any, queryName string, field
 		Log.Message(log.TRACE4, "query: %s", q)
 	}
 
-	return db.query(mock, conn, nil, dest, q, preparedVars)
+	return db.query(mock, conn, dest, q, preparedVars)
 }
 
 func Query(dbName string, dest any, queryName string, fields []string, vars []any) (err error) {
@@ -529,7 +582,7 @@ func QueryWithMock(mock MockCallback, dbName string, dest any, queryName string,
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) query(mock MockCallback, conn *sqlx.DB, tx *sqlx.Tx, dest any, q string, preparedVars []any) (err error) {
+func (db *DB) query(mock MockCallback, conn *sqlx.DB, dest any, q string, preparedVars []any) (err error) {
 	if db.mock == nil {
 		mock = nil
 	} else if mock == nil {
@@ -548,11 +601,7 @@ func (db *DB) query(mock MockCallback, conn *sqlx.DB, tx *sqlx.Tx, dest any, q s
 				}
 			}
 
-			if tx == nil {
-				err = conn.Select(dest, q, preparedVars...)
-			} else {
-				err = tx.Select(dest, q, preparedVars...)
-			}
+			err = conn.Select(dest, q, preparedVars...)
 			return
 		}
 
@@ -570,11 +619,7 @@ func (db *DB) query(mock MockCallback, conn *sqlx.DB, tx *sqlx.Tx, dest any, q s
 		}
 
 		var rows *sqlx.Rows
-		if tx == nil {
-			rows, err = conn.Queryx(q, preparedVars...)
-		} else {
-			rows, err = tx.Queryx(q, preparedVars...)
-		}
+		rows, err = conn.Queryx(q, preparedVars...)
 		if err != nil {
 			return err
 		}
@@ -618,39 +663,15 @@ func (db *DB) query(mock MockCallback, conn *sqlx.DB, tx *sqlx.Tx, dest any, q s
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-type Result struct {
-	ids  []int64
-	rows int64
-}
-
-func (r Result) AllInsertId() ([]int64, error) {
-	return r.ids, nil
-}
-
-func (r Result) LastInsertId() (int64, error) {
-	ln := len(r.ids)
-	if ln == 0 {
-		return 0, nil
-	}
-
-	return r.ids[ln-1], nil
-}
-
-func (r Result) RowsAffected() (int64, error) {
-	return r.rows, nil
-}
-
-//----------------------------------------------------------------------------------------------------------------------------//
-
-func (db *DB) Exec(queryName string, vars []any) (result sql.Result, err error) {
+func (db *DB) Exec(queryName string, vars []any) (result *Result, err error) {
 	return db.ExecExWithMock(nil, nil, queryName, PatternTypeNone, 0, nil, vars)
 }
 
-func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
+func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result *Result, err error) {
 	return db.ExecExWithMock(nil, dest, queryName, tp, firstDataFieldIdx, fields, vars)
 }
 
-func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
+func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result *Result, err error) {
 	t0 := misc.NowUnixNano()
 
 	defer func() {
@@ -697,30 +718,17 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 
 	ctx := context.Background()
 
-	tx, err := conn.BeginTxx(ctx, nil)
-	if err != nil {
-		return
-	}
-
-	defer func() {
-		if err != nil {
-			tx.Rollback()
-			return
-		}
-
-		err = tx.Commit()
-	}()
-
 	withDest := !(dest == nil || reflect.ValueOf(dest).IsNil())
 
 	if bulk == nil {
 		// simple exec
 
-		if withDest {
-			err = db.query(mock, conn, tx, dest, q, preparedVars)
-			result = nil
-		} else {
+		result = &Result{}
 
+		if withDest {
+			err = db.query(mock, conn, dest, q, preparedVars)
+			result.Add(nil, err)
+		} else {
 			if mock != nil {
 				err = mock(db, db.mock, q, preparedVars)
 				if err != nil {
@@ -728,7 +736,9 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 				}
 			}
 
-			result, err = tx.ExecContext(ctx, q, preparedVars...)
+			var r sql.Result
+			r, err = conn.Exec(q, preparedVars...)
+			result.Add(r, err)
 		}
 
 		return
@@ -743,12 +753,17 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 		}
 	}
 
-	stmt, err := tx.Preparex(q)
+	stmt, err := conn.Preparex(q)
 	if err != nil {
 		return
 	}
 
 	defer stmt.Close()
+
+	result = &Result{
+		ids:    make([]int64, 0, len(bulk)),
+		errors: make([]error, 0, len(bulk)),
+	}
 
 	if withDest {
 		t := reflect.TypeOf(dest)
@@ -764,18 +779,24 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 			return
 		}
 
-		qDestV := reflect.New(t)
-		qDest := qDestV.Interface()
-
 		allDestV := reflect.New(t).Elem()
 
 		for _, vars := range bulk {
-			err = stmt.SelectContext(ctx, qDest, vars...)
-			if err != nil {
-				return
+			qDestV := reflect.New(t)
+			qDest := qDestV.Interface()
+
+			e := stmt.SelectContext(ctx, qDest, vars...)
+			result.Add(nil, e)
+
+			var res reflect.Value
+			qe := qDestV.Elem()
+			if qe.Len() != 0 {
+				res = qe.Index(0)
+			} else {
+				res = reflect.New(qe.Type().Elem()).Elem()
 			}
 
-			allDestV = reflect.AppendSlice(allDestV, qDestV.Elem())
+			allDestV = reflect.Append(allDestV, res)
 		}
 
 		reflect.ValueOf(dest).Elem().Set(allDestV)
@@ -784,42 +805,24 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 
 	// without dest
 
-	res := &Result{
-		ids: make([]int64, 0, len(bulk)),
-	}
-
 	for _, vars := range bulk {
 		var r sql.Result
 		r, err = stmt.ExecContext(ctx, vars...)
-		if err != nil {
-			return
-		}
-
-		id, e := r.LastInsertId()
-		if e == nil {
-			res.ids = append(res.ids, id)
-		}
-
-		n, e := r.RowsAffected()
-		if e == nil {
-			res.rows += n
-		}
+		result.Add(r, err)
 	}
-
-	result = res
 
 	return
 }
 
-func Exec(dbName string, queryName string, vars []any) (result sql.Result, err error) {
+func Exec(dbName string, queryName string, vars []any) (result *Result, err error) {
 	return ExecExWithMock(nil, dbName, nil, queryName, PatternTypeNone, 0, nil, vars)
 }
 
-func ExecEx(dbName string, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
+func ExecEx(dbName string, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result *Result, err error) {
 	return ExecExWithMock(nil, dbName, dest, queryName, tp, firstDataFieldIdx, fields, vars)
 }
 
-func ExecExWithMock(mock MockCallback, dbName string, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result sql.Result, err error) {
+func ExecExWithMock(mock MockCallback, dbName string, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result *Result, err error) {
 	db, err := GetDB(dbName)
 	if err != nil {
 		return
