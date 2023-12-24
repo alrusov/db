@@ -549,7 +549,7 @@ func (db *DB) QueryWithMock(mock MockCallback, dest any, queryName string, field
 		return
 	}
 
-	conn, preparedVars, _, q, err := db.prepareQuery(queryName, PatternTypeSelect, vars)
+	preparedVars, _, q, err := db.prepareQuery(queryName, PatternTypeSelect, vars)
 	if err != nil {
 		return
 	}
@@ -564,7 +564,7 @@ func (db *DB) QueryWithMock(mock MockCallback, dest any, queryName string, field
 		Log.Message(log.TRACE4, "query: %s", q)
 	}
 
-	return db.query(mock, conn, dest, q, preparedVars)
+	return db.query(mock, dest, q, preparedVars)
 }
 
 func Query(dbName string, dest any, queryName string, fields []string, vars []any) (err error) {
@@ -582,7 +582,7 @@ func QueryWithMock(mock MockCallback, dbName string, dest any, queryName string,
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) query(mock MockCallback, conn *sqlx.DB, dest any, q string, preparedVars []any) (err error) {
+func (db *DB) query(mock MockCallback, dest any, q string, preparedVars []any) (err error) {
 	if db.mock == nil {
 		mock = nil
 	} else if mock == nil {
@@ -601,7 +601,7 @@ func (db *DB) query(mock MockCallback, conn *sqlx.DB, dest any, q string, prepar
 				}
 			}
 
-			err = conn.Select(dest, q, preparedVars...)
+			err = db.conn.Select(dest, q, preparedVars...)
 			return
 		}
 
@@ -619,7 +619,7 @@ func (db *DB) query(mock MockCallback, conn *sqlx.DB, dest any, q string, prepar
 		}
 
 		var rows *sqlx.Rows
-		rows, err = conn.Queryx(q, preparedVars...)
+		rows, err = db.conn.Queryx(q, preparedVars...)
 		if err != nil {
 			return err
 		}
@@ -705,7 +705,7 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 		Log.MessageWithSource(log.TRACE1, logSrc, "%s %v", queryName, vars)
 	}
 
-	conn, preparedVars, bulk, q, err := db.prepareQuery(queryName, tp, vars)
+	preparedVars, bulk, q, err := db.prepareQuery(queryName, tp, vars)
 	if err != nil {
 		return
 	}
@@ -726,7 +726,7 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 		result = &Result{}
 
 		if withDest {
-			err = db.query(mock, conn, dest, q, preparedVars)
+			err = db.query(mock, dest, q, preparedVars)
 			result.Add(nil, err)
 		} else {
 			if mock != nil {
@@ -737,7 +737,7 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 			}
 
 			var r sql.Result
-			r, err = conn.Exec(q, preparedVars...)
+			r, err = db.conn.Exec(q, preparedVars...)
 			result.Add(r, err)
 		}
 
@@ -753,7 +753,7 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 		}
 	}
 
-	stmt, err := conn.Preparex(q)
+	stmt, err := db.conn.Preparex(q)
 	if err != nil {
 		return
 	}
@@ -833,7 +833,7 @@ func ExecExWithMock(mock MockCallback, dbName string, dest any, queryName string
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (conn *sqlx.DB, preparedVars []any, bulk Bulk, q string, err error) {
+func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (preparedVars []any, bulk Bulk, q string, err error) {
 	if queryName != "" && queryName[0] == '#' {
 		q = queryName[1:]
 	} else {
@@ -841,11 +841,6 @@ func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (conn *
 		if err != nil {
 			return
 		}
-	}
-
-	conn, err = GetConn(db.Name)
-	if err != nil {
-		return
 	}
 
 	q, vars, err = doSubst(q, tp, vars)
@@ -868,7 +863,7 @@ func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (conn *
 					return
 				}
 
-				q = conn.Rebind(q)
+				q = db.conn.Rebind(q)
 				break
 			}
 		}
