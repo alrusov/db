@@ -1,5 +1,5 @@
-github.com/DATA-DOG/go-sqlmock v1.5.1 h1:FK6RCIUSfmbnI/imIICmboyQBkOckutaa6R5YYlLZyo=
-github.com/DATA-DOG/go-sqlmock v1.5.1/go.mod h1:88MAG/4G7SMwSE3CeA0ZKzrT5CiOU3OJ+JlNzwDqpNU=
+github.com/DATA-DOG/go-sqlmock v1.5.2 h1:OcvFkGmslmlZibjAjaHm3L//6LiuBgolP7OputlJIzU=
+github.com/DATA-DOG/go-sqlmock v1.5.2/go.mod h1:88MAG/4G7SMwSE3CeA0ZKzrT5CiOU3OJ+JlNzwDqpNU=
 github.com/alrusov/config v0.1.57 h1:tEyagi/qZfVyW+FBs4s5HvJwVqIvoMyGs6SvF5l1trE=
 github.com/alrusov/config v0.1.57/go.mod h1:aZnBFi6jVQRWkROYs0m4arhhD6++cLd4J0iep0EEbvM=
 github.com/alrusov/initializer v0.1.2 h1:AgMeT/SW7wvqo2x0cZCHaqBOpELQMjCI6yYQFMRKPv4=
@@ -10,8 +10,8 @@ github.com/alrusov/loadavg v0.1.5 h1:MmMPtOo16e9/tcg4WNNlN4PuiSv2ekGypk8GEDWGfA0
 github.com/alrusov/loadavg v0.1.5/go.mod h1:jh5SldXZFBsCBPC/rkvhyNsyPRq9LzWxgSfXbvwBO2M=
 github.com/alrusov/log v0.1.37 h1:xuNPxHLLK65ILvh9kEUdYoGjo9ABNbBVw8dw0niJ3jg=
 github.com/alrusov/log v0.1.37/go.mod h1:bMu3alaOTknnjHs4SFBVmZo0V5QgOgY8iN/ydj/pLVg=
-github.com/alrusov/misc v1.1.11 h1:AaEcKEcfHx2mig4dv6+EuTIk7njnpOpWVmmoW4bWqiY=
-github.com/alrusov/misc v1.1.11/go.mod h1:B6OUcmwFrllAJDOyGQSvEUi9bvOgxTwukbCI3/bPYT0=
+github.com/alrusov/misc v1.1.12 h1:+GGrd8ip6tW9wqV3FfT+46MOHvomCPnVLGC6Uo7qofg=
+github.com/alrusov/misc v1.1.12/go.mod h1:YN5X+BUNas1LV001q/l0QBH2/P62RvvwZmM3NvmS9n4=
 github.com/alrusov/panic v0.1.15 h1:b2IoZJySWdGUX+wXOXOF1dcxUXTYWeoRCt7x/ePZDwg=
 github.com/alrusov/panic v0.1.15/go.mod h1:YZ1wgCCIzqaPOnD5w2zJkpecV0DEfsClSgOVOEABKhY=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

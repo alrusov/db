@@ -589,17 +589,17 @@ func (db *DB) query(mock MockCallback, dest any, q string, preparedVars []any) (
 		mock = mockCallback
 	}
 
+	if mock != nil {
+		err = mock(db, db.mock, q, preparedVars)
+		if err != nil {
+			return
+		}
+	}
+
 	switch dest := dest.(type) {
 	default:
 		if k := reflect.Indirect(reflect.ValueOf(dest)).Kind(); k == reflect.Slice {
 			// Слайс [предположительно] структур - пытаемся залить данные туда
-
-			if mock != nil {
-				err = mock(db, db.mock, q, preparedVars)
-				if err != nil {
-					return
-				}
-			}
 
 			err = db.conn.Select(dest, q, preparedVars...)
 			return
@@ -608,15 +608,18 @@ func (db *DB) query(mock MockCallback, dest any, q string, preparedVars []any) (
 		err = fmt.Errorf(`illegal type of the dest (%T)`, dest)
 		return
 
+	case **sqlx.Rows:
+		var rows *sqlx.Rows
+		rows, err = db.conn.Queryx(q, preparedVars...)
+		if err != nil {
+			return err
+		}
+
+		*dest = rows
+		return
+
 	case *([]misc.InterfaceMap):
 		// Иначе - зальем в []InterfaceMap
-
-		if mock != nil {
-			err = mock(db, db.mock, q, preparedVars)
-			if err != nil {
-				return
-			}
-		}
 
 		var rows *sqlx.Rows
 		rows, err = db.conn.Queryx(q, preparedVars...)
