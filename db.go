@@ -196,6 +196,10 @@ func (r *Result) Add(sqlResult sql.Result, err error) {
 }
 
 func (r *Result) LastInsertId() (int64, error) {
+	if r == nil {
+		return 0, nil
+	}
+
 	ln := len(r.ids)
 	if ln == 0 {
 		return 0, nil
@@ -205,14 +209,26 @@ func (r *Result) LastInsertId() (int64, error) {
 }
 
 func (r *Result) RowsAffected() (int64, error) {
+	if r == nil {
+		return 0, nil
+	}
+
 	return r.rows, nil
 }
 
 func (r *Result) Errors() []error {
+	if r == nil {
+		return nil
+	}
+
 	return r.errors
 }
 
 func (r *Result) HasError() bool {
+	if r == nil {
+		return false
+	}
+
 	return r.hasError
 }
 
