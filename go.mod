@@ -1,6 +1,6 @@
 module github.com/alrusov/db
 
-go 1.21.5
+go 1.21.6
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2

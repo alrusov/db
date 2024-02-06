@@ -896,6 +896,12 @@ func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (prepar
 func doSubst(q string, tp PatternType, vars []any) (newQ string, newVars []any, err error) {
 	newQ = q
 
+	defer func() {
+		newQ = strings.ReplaceAll(newQ, PatternExtra, "")         // if not substituted before
+		newQ = strings.ReplaceAll(newQ, PatternExtraFrom, "")     // if not substituted before
+		newQ = strings.ReplaceAll(newQ, PatternExtraFullFrom, "") // if not substituted before
+	}()
+
 	if len(vars) == 0 {
 		newVars = vars
 		return
@@ -931,10 +937,6 @@ func doSubst(q string, tp PatternType, vars []any) (newQ string, newVars []any, 
 			newQ = strings.ReplaceAll(newQ, "@"+v.name+"@", s)
 		}
 	}
-
-	newQ = strings.ReplaceAll(newQ, PatternExtra, "")         // if not substituted before
-	newQ = strings.ReplaceAll(newQ, PatternExtraFrom, "")     // if not substituted before
-	newQ = strings.ReplaceAll(newQ, PatternExtraFullFrom, "") // if not substituted before
 
 	return
 }
