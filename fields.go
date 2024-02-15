@@ -120,7 +120,6 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 
 	jbPairs = make(JbPairs, 0, ln)
 	names = make([]string, ln) // потом обрежем
-	fieldsInfo := make([]*FieldInfo, 0, ln)
 	rows = make(Bulk, 0, len(data))
 	rowsJb := make(Bulk, 0, len(data))
 
@@ -152,8 +151,6 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 			idx, exists := knownNames[fullName]
 			if !exists {
 				isNew = true
-
-				fieldsInfo = append(fieldsInfo, fieldInfo)
 
 				idx = currIdx
 				if isJb {

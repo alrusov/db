@@ -85,6 +85,8 @@ const (
 	SubstExtra         = "EXTRA"
 	SubstExtraFrom     = "EXTRA_FROM"
 	SubstExtraFullFrom = "EXTRA_FULL_FROM"
+	SubstBefore        = "BEFORE"
+	SubstAfter         = "AFTER"
 
 	PatternNames         = "@" + SubstNames + "@"
 	PatternNamesPreComma = "@" + SubstNamesPreComma + "@"
@@ -513,6 +515,59 @@ func GetQuery(dbName string, queryName string) (q string, err error) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
+func (db *DB) before(vars []any) (err error) {
+	return db.internalExec(vars, SubstBefore)
+}
+
+func (db *DB) after(vars []any) (err error) {
+	return db.internalExec(vars, SubstAfter)
+}
+
+func (db *DB) internalExec(vars []any, name string) (err error) {
+	for _, v := range vars {
+		switch v := v.(type) {
+		case *SubstArg:
+			if v == nil {
+				err = fmt.Errorf(`subst is nil`)
+				return
+			}
+
+			if v.name != name {
+				continue
+			}
+
+			var qq []string
+
+			switch val := v.value.(type) {
+			case []string:
+				qq = val
+			case string:
+				qq = []string{val}
+			default:
+				err = fmt.Errorf(`subst %#v: value id not string or slice of string`, v.name)
+				return
+			}
+
+			for _, q := range qq {
+				if q == "" {
+					continue
+				}
+
+				_, err = db.conn.Exec(q)
+				if err != nil {
+					return
+				}
+			}
+
+			return
+		}
+	}
+
+	return
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
 func (db *DB) Query(dest any, queryName string, fields []string, vars []any) (err error) {
 	return db.QueryWithMock(nil, dest, queryName, fields, vars)
 }
@@ -610,6 +665,18 @@ func (db *DB) query(mock MockCallback, dest any, q string, preparedVars []any) (
 		if err != nil {
 			return
 		}
+	} else {
+		err = db.before(preparedVars)
+		if err != nil {
+			return
+		}
+
+		defer func() {
+			err = db.after(preparedVars)
+			if err != nil {
+				return
+			}
+		}()
 	}
 
 	switch dest := dest.(type) {
@@ -733,6 +800,20 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 
 	if Log.CurrentLogLevel() >= log.TRACE4 {
 		Log.Message(log.TRACE4, "exec: %s", q)
+	}
+
+	if mock == nil {
+		err = db.before(vars)
+		if err != nil {
+			return
+		}
+
+		defer func() {
+			err = db.after(vars)
+			if err != nil {
+				return
+			}
+		}()
 	}
 
 	ctx := context.Background()
