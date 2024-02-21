@@ -672,8 +672,8 @@ func (db *DB) query(mock MockCallback, dest any, q string, preparedVars []any) (
 		}
 
 		defer func() {
-			err = db.after(preparedVars)
-			if err != nil {
+			e := db.after(preparedVars)
+			if e != nil {
 				return
 			}
 		}()
@@ -809,8 +809,8 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 		}
 
 		defer func() {
-			err = db.after(vars)
-			if err != nil {
+			e := db.after(vars)
+			if e != nil {
 				return
 			}
 		}()
@@ -826,8 +826,8 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 		result = &Result{}
 
 		if withDest {
-			err = db.query(mock, dest, q, preparedVars)
-			result.Add(nil, err)
+			e := db.query(mock, dest, q, preparedVars)
+			result.Add(nil, e)
 		} else {
 			if mock != nil {
 				err = mock(db, db.mock, q, preparedVars)
@@ -837,8 +837,8 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 			}
 
 			var r sql.Result
-			r, err = db.conn.Exec(q, preparedVars...)
-			result.Add(r, err)
+			r, e := db.conn.Exec(q, preparedVars...)
+			result.Add(r, e)
 		}
 
 		return
@@ -907,8 +907,8 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 
 	for _, vars := range bulk {
 		var r sql.Result
-		r, err = stmt.ExecContext(ctx, vars...)
-		result.Add(r, err)
+		r, e := stmt.ExecContext(ctx, vars...)
+		result.Add(r, e)
 	}
 
 	return
