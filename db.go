@@ -515,59 +515,6 @@ func GetQuery(dbName string, queryName string) (q string, err error) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) before(vars []any) (err error) {
-	return db.internalExec(vars, SubstBefore)
-}
-
-func (db *DB) after(vars []any) (err error) {
-	return db.internalExec(vars, SubstAfter)
-}
-
-func (db *DB) internalExec(vars []any, name string) (err error) {
-	for _, v := range vars {
-		switch v := v.(type) {
-		case *SubstArg:
-			if v == nil {
-				err = fmt.Errorf(`subst is nil`)
-				return
-			}
-
-			if v.name != name {
-				continue
-			}
-
-			var qq []string
-
-			switch val := v.value.(type) {
-			case []string:
-				qq = val
-			case string:
-				qq = []string{val}
-			default:
-				err = fmt.Errorf(`subst %#v: value id not string or slice of string`, v.name)
-				return
-			}
-
-			for _, q := range qq {
-				if q == "" {
-					continue
-				}
-
-				_, err = db.conn.Exec(q)
-				if err != nil {
-					return
-				}
-			}
-
-			return
-		}
-	}
-
-	return
-}
-
-//----------------------------------------------------------------------------------------------------------------------------//
-
 func (db *DB) Query(dest any, queryName string, fields []string, vars []any) (err error) {
 	return db.QueryWithMock(nil, dest, queryName, fields, vars)
 }
@@ -665,18 +612,6 @@ func (db *DB) query(mock MockCallback, dest any, q string, preparedVars []any) (
 		if err != nil {
 			return
 		}
-	} else {
-		err = db.before(preparedVars)
-		if err != nil {
-			return
-		}
-
-		defer func() {
-			e := db.after(preparedVars)
-			if e != nil {
-				return
-			}
-		}()
 	}
 
 	switch dest := dest.(type) {
@@ -800,20 +735,6 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 
 	if Log.CurrentLogLevel() >= log.TRACE4 {
 		Log.Message(log.TRACE4, "exec: %s", q)
-	}
-
-	if mock == nil {
-		err = db.before(vars)
-		if err != nil {
-			return
-		}
-
-		defer func() {
-			e := db.after(vars)
-			if e != nil {
-				return
-			}
-		}()
 	}
 
 	ctx := context.Background()
@@ -976,11 +897,29 @@ func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (prepar
 
 func doSubst(q string, tp PatternType, vars []any) (newQ string, newVars []any, err error) {
 	newQ = q
+	before := ""
+	after := ""
 
 	defer func() {
 		newQ = strings.ReplaceAll(newQ, PatternExtra, "")         // if not substituted before
 		newQ = strings.ReplaceAll(newQ, PatternExtraFrom, "")     // if not substituted before
 		newQ = strings.ReplaceAll(newQ, PatternExtraFullFrom, "") // if not substituted before
+
+		if before != "" || after != "" {
+			qq := make([]string, 0, 3)
+
+			if before != "" {
+				qq = append(qq, before)
+			}
+
+			qq = append(qq, newQ)
+
+			if after != "" {
+				qq = append(qq, after)
+			}
+
+			newQ = strings.Join(qq, ";")
+		}
 	}()
 
 	if len(vars) == 0 {
@@ -1009,6 +948,17 @@ func doSubst(q string, tp PatternType, vars []any) (newQ string, newVars []any, 
 				if err != nil {
 					err = fmt.Errorf(`subst %#v: %s`, v, err)
 					return
+				}
+
+				switch v.name {
+				default:
+					// nothing to do
+				case SubstBefore:
+					before = s
+					continue
+				case SubstAfter:
+					after = s
+					continue
 				}
 
 			case JbPairs: // for pgsql only...
