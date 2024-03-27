@@ -119,6 +119,12 @@ var (
 
 	mockEnabled  = false
 	mockCallback = MockCallback(nil)
+
+	cleanupPatterns = misc.StringMap{
+		PatternExtra:         "",
+		PatternExtraFrom:     "",
+		PatternExtraFullFrom: "",
+	}
 )
 
 //----------------------------------------------------------------------------------------------------------------------------//
@@ -242,6 +248,14 @@ func Disable() {
 
 func Disabled() bool {
 	return disabled
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+func AddCleanupPatterns(p misc.StringMap) {
+	for name, val := range p {
+		cleanupPatterns["@"+name+"@"] = val
+	}
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
@@ -901,9 +915,9 @@ func doSubst(q string, tp PatternType, vars []any) (newQ string, newVars []any, 
 	after := ""
 
 	defer func() {
-		newQ = strings.ReplaceAll(newQ, PatternExtra, "")         // if not substituted before
-		newQ = strings.ReplaceAll(newQ, PatternExtraFrom, "")     // if not substituted before
-		newQ = strings.ReplaceAll(newQ, PatternExtraFullFrom, "") // if not substituted before
+		for name, val := range cleanupPatterns {
+			newQ = strings.ReplaceAll(newQ, name, val) // if not substituted before
+		}
 
 		if before != "" || after != "" {
 			qq := make([]string, 0, 3)
