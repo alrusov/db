@@ -68,6 +68,13 @@ type (
 		message string
 		parent  error
 	}
+
+	executor interface {
+		Queryx(query string, args ...any) (*sqlx.Rows, error)
+		Select(dest any, query string, args ...any) error
+		Exec(query string, arg ...any) (sql.Result, error)
+		Preparex(query string) (*sqlx.Stmt, error)
+	}
 )
 
 const (
@@ -489,21 +496,24 @@ func GetDB(dbName string) (db *DB, err error) {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
+func (db *DB) GetConn() (conn *sqlx.DB, err error) {
+	conn = db.conn
+
+	if conn == nil {
+		err = NewError(nil, "database %s is not connected", db.Name)
+		return
+	}
+
+	return
+}
+
 func GetConn(dbName string) (conn *sqlx.DB, err error) {
 	db, err := GetDB(dbName)
 	if err != nil {
 		return
 	}
 
-	conn = db.conn
-
-	if conn == nil {
-		err = NewError(nil, "database %s is not connected", dbName)
-		return
-
-	}
-
-	return
+	return db.GetConn()
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
@@ -530,20 +540,27 @@ func GetQuery(dbName string, queryName string) (q string, err error) {
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func (db *DB) Query(dest any, queryName string, fields []string, vars []any) (err error) {
-	return db.QueryWithMock(nil, dest, queryName, fields, vars)
+	return db.QueryTxWithMock(nil, nil, dest, queryName, fields, vars)
+}
+
+func (db *DB) QueryTx(tx *sqlx.Tx, dest any, queryName string, fields []string, vars []any) (err error) {
+	return db.QueryTxWithMock(nil, tx, dest, queryName, fields, vars)
 }
 
 func (db *DB) QueryWithMock(mock MockCallback, dest any, queryName string, fields []string, vars []any) (err error) {
+	return db.QueryTxWithMock(mock, nil, dest, queryName, fields, vars)
+}
+
+func (db *DB) QueryTxWithMock(mock MockCallback, tx *sqlx.Tx, dest any, queryName string, fields []string, vars []any) (err error) {
 	t0 := misc.NowUnixNano()
+
+	db.statBegin(false)
 
 	defer func() {
 		if err != nil {
 			err = NewError(err, "%s: %s", queryName, err)
 		}
-	}()
 
-	db.statBegin(false)
-	defer func() {
 		db.statEnd(false, time.Duration(misc.NowUnixNano()-t0))
 	}()
 
@@ -596,7 +613,7 @@ func (db *DB) QueryWithMock(mock MockCallback, dest any, queryName string, field
 		Log.Message(log.TRACE4, "query: %s", q)
 	}
 
-	return db.query(mock, dest, q, preparedVars)
+	return db.query(mock, tx, dest, q, preparedVars)
 }
 
 func Query(dbName string, dest any, queryName string, fields []string, vars []any) (err error) {
@@ -614,7 +631,13 @@ func QueryWithMock(mock MockCallback, dbName string, dest any, queryName string,
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) query(mock MockCallback, dest any, q string, preparedVars []any) (err error) {
+func (db *DB) query(mock MockCallback, tx *sqlx.Tx, dest any, q string, preparedVars []any) (err error) {
+	var ex executor
+	ex = tx
+	if tx == nil {
+		ex = db.conn
+	}
+
 	if db.mock == nil {
 		mock = nil
 	} else if mock == nil {
@@ -633,7 +656,7 @@ func (db *DB) query(mock MockCallback, dest any, q string, preparedVars []any) (
 		if k := reflect.Indirect(reflect.ValueOf(dest)).Kind(); k == reflect.Slice {
 			// Слайс [предположительно] структур - пытаемся залить данные туда
 
-			err = db.conn.Select(dest, q, preparedVars...)
+			err = ex.Select(dest, q, preparedVars...)
 			return
 		}
 
@@ -642,7 +665,7 @@ func (db *DB) query(mock MockCallback, dest any, q string, preparedVars []any) (
 
 	case **sqlx.Rows:
 		var rows *sqlx.Rows
-		rows, err = db.conn.Queryx(q, preparedVars...)
+		rows, err = ex.Queryx(q, preparedVars...)
 		if err != nil {
 			return err
 		}
@@ -654,7 +677,7 @@ func (db *DB) query(mock MockCallback, dest any, q string, preparedVars []any) (
 		// Иначе - зальем в []InterfaceMap
 
 		var rows *sqlx.Rows
-		rows, err = db.conn.Queryx(q, preparedVars...)
+		rows, err = ex.Queryx(q, preparedVars...)
 		if err != nil {
 			return err
 		}
@@ -699,15 +722,33 @@ func (db *DB) query(mock MockCallback, dest any, q string, preparedVars []any) (
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func (db *DB) Exec(queryName string, vars []any) (result *Result, err error) {
-	return db.ExecExWithMock(nil, nil, queryName, PatternTypeNone, 0, nil, vars)
+	return db.ExecTxExWithMock(nil, nil, nil, queryName, PatternTypeNone, 0, nil, vars)
+}
+
+func (db *DB) ExecTx(tx *sqlx.Tx, queryName string, vars []any) (result *Result, err error) {
+	return db.ExecTxExWithMock(nil, tx, nil, queryName, PatternTypeNone, 0, nil, vars)
 }
 
 func (db *DB) ExecEx(dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result *Result, err error) {
-	return db.ExecExWithMock(nil, dest, queryName, tp, firstDataFieldIdx, fields, vars)
+	return db.ExecTxExWithMock(nil, nil, dest, queryName, tp, firstDataFieldIdx, fields, vars)
+}
+
+func (db *DB) ExecTxEx(tx *sqlx.Tx, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result *Result, err error) {
+	return db.ExecTxExWithMock(nil, tx, dest, queryName, tp, firstDataFieldIdx, fields, vars)
 }
 
 func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result *Result, err error) {
+	return db.ExecTxExWithMock(mock, nil, dest, queryName, tp, firstDataFieldIdx, fields, vars)
+}
+
+func (db *DB) ExecTxExWithMock(mock MockCallback, tx *sqlx.Tx, dest any, queryName string, tp PatternType, firstDataFieldIdx int, fields []string, vars []any) (result *Result, err error) {
 	t0 := misc.NowUnixNano()
+
+	var ex executor
+	ex = tx
+	if tx == nil {
+		ex = db.conn
+	}
 
 	defer func() {
 		if err != nil {
@@ -761,7 +802,7 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 		result = &Result{}
 
 		if withDest {
-			e := db.query(mock, dest, q, preparedVars)
+			e := db.query(mock, tx, dest, q, preparedVars)
 			result.Add(nil, e)
 		} else {
 			if mock != nil {
@@ -772,7 +813,7 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 			}
 
 			var r sql.Result
-			r, e := db.conn.Exec(q, preparedVars...)
+			r, e := ex.Exec(q, preparedVars...)
 			result.Add(r, e)
 		}
 
@@ -788,7 +829,7 @@ func (db *DB) ExecExWithMock(mock MockCallback, dest any, queryName string, tp P
 		}
 	}
 
-	stmt, err := db.conn.Preparex(q)
+	stmt, err := ex.Preparex(q)
 	if err != nil {
 		return
 	}
