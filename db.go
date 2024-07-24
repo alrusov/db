@@ -78,8 +78,11 @@ type (
 )
 
 const (
-	TagDB    = "db"
-	TagDBAlt = "dbAlt"
+	TagDB      = "db"
+	TagDBAlt   = "dbAlt"
+	TagDefault = "default"
+
+	DefaultValueNull = "NULL"
 
 	SubstTable         = "TABLE"
 	SubstNames         = "NAMES"

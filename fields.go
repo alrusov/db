@@ -360,13 +360,13 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 						v = &s
 					}
 
-					defVal, defValExists := sf.Tag.Lookup("default")
-					if !defValExists {
+					defVal, defValExists := sf.Tag.Lookup(TagDefault)
+					if !defValExists || defVal == DefaultValueNull {
 						v = nil
 					} else {
 						err = misc.Iface2IfacePtr(defVal, v)
 						if err != nil {
-							err = fmt.Errorf("%s(default): %s", name, err)
+							err = fmt.Errorf("%s(%s): %s", name, TagDefault, err)
 							return
 						}
 
