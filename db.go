@@ -436,7 +436,7 @@ func (db *DB) Connect() (doRetry bool, err error) {
 func (c Config) ConnectAll() (err error) {
 	msgs := misc.NewMessages()
 
-	wg := new(sync.WaitGroup)
+	wg := sync.WaitGroup{}
 	wg.Add(len(c))
 
 	for _, db := range c {

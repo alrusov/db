@@ -12,7 +12,7 @@ import (
 
 type (
 	Stat struct {
-		mutex  *sync.Mutex
+		sync.Mutex
 		period time.Duration
 		Stat   map[string]*connStat `json:"stat,omitempty"`
 	}
@@ -37,7 +37,6 @@ type (
 
 var (
 	stat = &Stat{
-		mutex:  new(sync.Mutex),
 		period: time.Second * 60,
 		Stat:   make(map[string]*connStat, 8),
 	}
@@ -53,8 +52,8 @@ func SetStatPeriod(newPeriod time.Duration) (oldPeriod time.Duration) {
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func GetStat() *Stat {
-	stat.mutex.Lock()
-	defer stat.mutex.Unlock()
+	stat.Lock()
+	defer stat.Unlock()
 
 	for _, s := range stat.Stat {
 		s.Query.update()
@@ -66,8 +65,8 @@ func GetStat() *Stat {
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func newStat(name string) (err error) {
-	stat.mutex.Lock()
-	defer stat.mutex.Unlock()
+	stat.Lock()
+	defer stat.Unlock()
 
 	_, exists := stat.Stat[name]
 	if exists {
@@ -99,7 +98,6 @@ func newFuncStat() *funcStat {
 func (src *Stat) cloneVals() (dst *Stat) {
 	// уже залочено
 	dst = &Stat{
-		mutex:  nil,
 		period: 0,
 		Stat:   make(map[string]*connStat, len(src.Stat)),
 	}
@@ -119,8 +117,8 @@ func (src *Stat) cloneVals() (dst *Stat) {
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func (db *DB) statBegin(isExec bool) {
-	stat.mutex.Lock()
-	defer stat.mutex.Unlock()
+	stat.Lock()
+	defer stat.Unlock()
 
 	c := db.getConnStat()
 	if c == nil {
@@ -135,8 +133,8 @@ func (db *DB) statBegin(isExec bool) {
 }
 
 func (db *DB) statEnd(isExec bool, duration time.Duration) {
-	stat.mutex.Lock()
-	defer stat.mutex.Unlock()
+	stat.Lock()
+	defer stat.Unlock()
 
 	c := db.getConnStat()
 	if c == nil {
