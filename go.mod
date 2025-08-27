@@ -1,15 +1,15 @@
 module github.com/alrusov/db
 
-go 1.22.5
+go 1.25.0
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
-	github.com/alrusov/config v0.1.59
+	github.com/alrusov/config v0.1.65
 	github.com/alrusov/initializer v0.1.2
 	github.com/alrusov/jsonw v0.1.3
 	github.com/alrusov/loadavg v0.1.6
 	github.com/alrusov/log v0.1.39
-	github.com/alrusov/misc v1.1.15
+	github.com/alrusov/misc v1.1.26
 	github.com/alrusov/panic v0.1.15
 	github.com/jmoiron/sqlx v1.4.0
 )

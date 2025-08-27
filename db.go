@@ -300,6 +300,7 @@ func (x *Config) Check(cfg any) (err error) {
 	knownCfg = x
 
 	msgs := misc.NewMessages()
+	defer msgs.Free()
 
 	for name, df := range *x {
 		if !df.Active {
@@ -331,6 +332,7 @@ func (x *Config) Check(cfg any) (err error) {
 // Проверка валидности DB
 func (x *DB) Check(cfg any) (err error) {
 	msgs := misc.NewMessages()
+	defer msgs.Free()
 
 	if x.Driver == "" {
 		msgs.Add("empty driver")
@@ -435,6 +437,7 @@ func (db *DB) Connect() (doRetry bool, err error) {
 
 func (c Config) ConnectAll() (err error) {
 	msgs := misc.NewMessages()
+	defer msgs.Free()
 
 	wg := sync.WaitGroup{}
 	wg.Add(len(c))
