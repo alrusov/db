@@ -604,7 +604,7 @@ func (db *DB) QueryTxWithMock(mock MockCallback, tx *sqlx.Tx, dest any, queryNam
 		return
 	}
 
-	preparedVars, _, q, err := db.prepareQuery(queryName, PatternTypeSelect, vars)
+	preparedVars, _, q, before, after, err := db.prepareQuery(queryName, PatternTypeSelect, vars)
 	if err != nil {
 		return
 	}
@@ -619,7 +619,7 @@ func (db *DB) QueryTxWithMock(mock MockCallback, tx *sqlx.Tx, dest any, queryNam
 		Log.Message(log.TRACE4, "query: %s", q)
 	}
 
-	return db.query(mock, tx, dest, q, preparedVars)
+	return db.query(mock, tx, dest, q, before, after, preparedVars)
 }
 
 func Query(dbName string, dest any, queryName string, fields []string, vars []any) (err error) {
@@ -637,7 +637,7 @@ func QueryWithMock(mock MockCallback, dbName string, dest any, queryName string,
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) query(mock MockCallback, tx *sqlx.Tx, dest any, q string, preparedVars []any) (err error) {
+func (db *DB) query(mock MockCallback, tx *sqlx.Tx, dest any, q string, before string, after string, preparedVars []any) (err error) {
 	var ex executor
 	ex = tx
 	if tx == nil {
@@ -655,6 +655,23 @@ func (db *DB) query(mock MockCallback, tx *sqlx.Tx, dest any, q string, prepared
 		if err != nil {
 			return
 		}
+	}
+
+	if before != "" {
+		_, err = ex.Exec(before)
+		if err != nil {
+			return
+		}
+	}
+
+	if after != "" {
+		defer func() {
+			_, e := ex.Exec(after)
+			if err == nil && e != nil {
+				err = e
+				return
+			}
+		}()
 	}
 
 	switch dest := dest.(type) {
@@ -787,7 +804,7 @@ func (db *DB) ExecTxExWithMock(mock MockCallback, tx *sqlx.Tx, dest any, queryNa
 		Log.MessageWithSource(log.TRACE1, logSrc, "%s %v", queryName, vars)
 	}
 
-	preparedVars, bulk, q, err := db.prepareQuery(queryName, tp, vars)
+	preparedVars, bulk, q, before, after, err := db.prepareQuery(queryName, tp, vars)
 	if err != nil {
 		return
 	}
@@ -808,7 +825,7 @@ func (db *DB) ExecTxExWithMock(mock MockCallback, tx *sqlx.Tx, dest any, queryNa
 		result = &Result{}
 
 		if withDest {
-			e := db.query(mock, tx, dest, q, preparedVars)
+			e := db.query(mock, tx, dest, q, before, after, preparedVars)
 			result.Add(nil, e)
 		} else {
 			if mock != nil {
@@ -915,7 +932,7 @@ func ExecExWithMock(mock MockCallback, dbName string, dest any, queryName string
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (preparedVars []any, bulk Bulk, q string, err error) {
+func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (preparedVars []any, bulk Bulk, q string, before string, after string, err error) {
 	if queryName != "" && queryName[0] == '#' {
 		q = queryName[1:]
 	} else {
@@ -925,7 +942,7 @@ func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (prepar
 		}
 	}
 
-	q, vars, err = doSubst(q, tp, vars)
+	q, before, after, vars, err = doSubst(q, tp, vars)
 	if err != nil {
 		return
 	}
@@ -956,30 +973,12 @@ func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (prepar
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func doSubst(q string, tp PatternType, vars []any) (newQ string, newVars []any, err error) {
+func doSubst(q string, tp PatternType, vars []any) (newQ string, before string, after string, newVars []any, err error) {
 	newQ = q
-	before := ""
-	after := ""
 
 	defer func() {
 		for name, val := range cleanupPatterns {
 			newQ = strings.ReplaceAll(newQ, name, val) // if not substituted before
-		}
-
-		if before != "" || after != "" {
-			qq := make([]string, 0, 3)
-
-			if before != "" {
-				qq = append(qq, before)
-			}
-
-			qq = append(qq, newQ)
-
-			if after != "" {
-				qq = append(qq, after)
-			}
-
-			newQ = strings.Join(qq, ";")
 		}
 	}()
 
