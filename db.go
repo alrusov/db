@@ -1148,3 +1148,20 @@ func (jbp JbPairs) block2string(tp PatternType, startIdx int, container string) 
 }
 
 //----------------------------------------------------------------------------------------------------------------------------//
+
+func ReplaсeFieldNames(fields FieldsInfoMap, pNames []*string) (err error) {
+	msgs := misc.NewMessages()
+	defer msgs.Free()
+
+	for _, pName := range pNames {
+		name := *pName
+		*pName, err = fields.Field2Name(name)
+		if err != nil {
+			msgs.Add(`undefined field "%s"`, name)
+		}
+	}
+
+	return msgs.Error()
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
