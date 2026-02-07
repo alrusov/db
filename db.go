@@ -1149,7 +1149,7 @@ func (jbp JbPairs) block2string(tp PatternType, startIdx int, container string) 
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func ReplaсeFieldNames(fields FieldsInfoMap, pNames []*string) (err error) {
+func ReplaceFieldNames(fields FieldsInfoMap, pNames []*string) (err error) {
 	msgs := misc.NewMessages()
 	defer msgs.Free()
 
