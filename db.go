@@ -78,9 +78,10 @@ type (
 )
 
 const (
-	TagDB      = "db"
-	TagDBAlt   = "dbAlt"
-	TagDefault = "default"
+	TagDB       = "db"
+	TagDBAlt    = "dbAlt"
+	TagDBSimple = "dbSimple"
+	TagDefault  = "default"
 
 	DefaultValueNull = "NULL"
 
@@ -385,6 +386,10 @@ func (bh mockBlackHole) ConvertValue(v any) (driver.Value, error) {
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func (db *DB) Connect() (doRetry bool, err error) {
+	return db.ConnectEx("")
+}
+
+func (db *DB) ConnectEx(dbTag string) (doRetry bool, err error) {
 	doRetry = true
 
 	defer func() {
@@ -423,7 +428,9 @@ func (db *DB) Connect() (doRetry bool, err error) {
 		return
 	}
 
-	if altTagsEnabled {
+	if dbTag != "" {
+		conn.Mapper = reflectx.NewMapperFunc(dbTag, strings.ToLower)
+	} else if altTagsEnabled {
 		conn.Mapper = reflectx.NewMapperFunc(TagDBAlt, strings.ToLower)
 	}
 
@@ -1149,7 +1156,7 @@ func (jbp JbPairs) block2string(tp PatternType, startIdx int, container string) 
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
-func ReplaceFieldNames(fields FieldsInfoMap, pNames []*string) (err error) {
+func ReplaсeFieldNames(fields FieldsInfoMap, pNames []*string) (err error) {
 	msgs := misc.NewMessages()
 	defer msgs.Free()
 
