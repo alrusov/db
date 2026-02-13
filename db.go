@@ -476,7 +476,7 @@ func (c Config) ConnectAll() (err error) {
 
 				Log.Message(log.INFO, "[%s] database connection created", db.Name)
 
-				misc.AddExitFunc(
+				misc.AddFinalizer(
 					fmt.Sprintf("db[%s]", db.Name),
 					func(_ int, _ any) {
 						db.conn.Close()
