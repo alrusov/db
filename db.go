@@ -243,6 +243,25 @@ func (r *Result) Errors() []error {
 	return r.errors
 }
 
+func (r *Result) CombinedError() error {
+	if r == nil {
+		return nil
+	}
+
+	ss := make([]string, 0, len(r.errors))
+	for _, e := range r.errors {
+		if e != nil {
+			ss = append(ss, e.Error())
+		}
+	}
+
+	if len(ss) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("%s", strings.Join(ss, "; "))
+}
+
 func (r *Result) HasError() bool {
 	if r == nil {
 		return false
@@ -873,7 +892,7 @@ func (db *DB) ExecTxExWithMock(mock MockCallback, tx *sqlx.Tx, dest any, queryNa
 
 	if withDest {
 		t := reflect.TypeOf(dest)
-		if t.Kind() != reflect.Ptr {
+		if t.Kind() != reflect.Pointer {
 			err = fmt.Errorf("dest %T is not a pointer", dest)
 			return
 		}

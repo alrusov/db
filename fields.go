@@ -40,6 +40,7 @@ type (
 		DefVal      any          // 12345
 		Tags        misc.StringMap
 		Skipped     bool
+		ReadOnly    bool
 	}
 
 	FieldsInfoMap map[string]*FieldInfo
@@ -328,6 +329,7 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				FieldName: path + sf.Name,
 				JsonName:  jPath + misc.StructTagName(&sf, "json"),
 				Tags:      tags,
+				ReadOnly:  sf.Tag.Get("readonly") == "true",
 			}
 
 			clean, ok := fieldInfo.Tags["clean"]
