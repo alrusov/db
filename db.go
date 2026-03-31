@@ -1032,7 +1032,7 @@ func doSubst(q string, tp PatternType, vars []any) (newQ string, before string, 
 			default:
 				s, err = misc.Iface2String(val)
 				if err != nil {
-					err = fmt.Errorf(`subst %#v: %s`, v, err)
+					err = fmt.Errorf(`subst %#v: %w`, v, err)
 					return
 				}
 

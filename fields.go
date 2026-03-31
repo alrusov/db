@@ -368,7 +368,7 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 					} else {
 						err = misc.Iface2IfacePtr(defVal, v)
 						if err != nil {
-							err = fmt.Errorf("%s(%s): %s", name, TagDefault, err)
+							err = fmt.Errorf("%s(%s): %w", name, TagDefault, err)
 							return
 						}
 
