@@ -1074,7 +1074,7 @@ func fillPatterns(q string, tp PatternType, firstDataFieldIdx int, fields []stri
 		f := strings.Join(fields, ",")
 
 		vv := make([]string, nf)
-		for i := 0; i < nf; i++ {
+		for i := range nf {
 			vv[i] = "$" + strconv.FormatInt(int64(firstDataFieldIdx+i), 10)
 		}
 		v := strings.Join(vv, ",")
@@ -1091,7 +1091,7 @@ func fillPatterns(q string, tp PatternType, firstDataFieldIdx int, fields []stri
 
 	case PatternTypeUpdate:
 		vv := make([]string, nf)
-		for i := 0; i < nf; i++ {
+		for i := range nf {
 			vv[i] = fmt.Sprintf("%s=$%d", fields[i], firstDataFieldIdx+i)
 		}
 

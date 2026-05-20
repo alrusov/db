@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"strings"
@@ -238,7 +239,7 @@ func (fields *FieldsList) Prepare(data []misc.InterfaceMap) (jbPairs JbPairs, na
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func MakeFieldsList(o any) (fields *FieldsList, err error) {
-	fields, err = makeFieldsList(nil, o, "", "")
+	fields, err = makeFieldsList(nil, o, "", "", map[string]struct{}{})
 	if err != nil {
 		return
 	}
@@ -273,15 +274,7 @@ func MakeFieldsList(o any) (fields *FieldsList, err error) {
 	return
 }
 
-func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields *FieldsList, err error) {
-	if path != "" {
-		path += "."
-	}
-
-	if jPath != "" {
-		jPath += "."
-	}
-
+func makeFieldsList(parent *FieldInfo, o any, path string, jPath string, objPath map[string]struct{}) (fields *FieldsList, err error) {
 	t := reflect.TypeOf(o)
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -292,6 +285,23 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 		return
 	}
 
+	objName := t.String()
+	if _, exists := objPath[objName]; exists {
+		return
+	}
+	objPath[objName] = struct{}{}
+	defer func() {
+		delete(objPath, objName)
+	}()
+
+	if path != "" {
+		path += "."
+	}
+
+	if jPath != "" {
+		jPath += "."
+	}
+
 	n := t.NumField()
 	fields = &FieldsList{
 		byName:        make(FieldsInfoMap, n),
@@ -300,7 +310,7 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 		byCleanDbName: make(FieldsInfoMap, n),
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		var fieldInfo *FieldInfo
 		fieldInfo, err = func() (fieldInfo *FieldInfo, err error) {
 			sf := t.Field(i)
@@ -444,27 +454,19 @@ func makeFieldsList(parent *FieldInfo, o any, path string, jPath string) (fields
 				subjPath += misc.StructTagName(&sf, "json")
 			}
 
-			subFields, err = makeFieldsList(fieldInfo, reflect.New(t).Interface(), subPath, subjPath)
+			subFields, err = makeFieldsList(fieldInfo, reflect.New(t).Interface(), subPath, subjPath, objPath)
 			if err != nil {
 				return
 			}
 
-			for k, v := range subFields.byName {
-				fields.byName[k] = v
+			if subFields == nil {
+				return
 			}
 
-			for k, v := range subFields.byJsonName {
-				fields.byJsonName[k] = v
-			}
-
-			for k, v := range subFields.byDbName {
-				fields.byDbName[k] = v
-			}
-
-			for k, v := range subFields.byCleanDbName {
-				fields.byCleanDbName[k] = v
-			}
-
+			maps.Copy(fields.byName, subFields.byName)
+			maps.Copy(fields.byJsonName, subFields.byJsonName)
+			maps.Copy(fields.byDbName, subFields.byDbName)
+			maps.Copy(fields.byCleanDbName, subFields.byCleanDbName)
 			return
 		}()
 
