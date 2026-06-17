@@ -60,6 +60,11 @@ type (
 		value any
 	}
 
+	UnionArg struct {
+		name  string
+		value any
+	}
+
 	Bulk [][]any
 
 	MockCallback func(db *DB, mock sqlmock.Sqlmock, q string, v []any) (err error)
@@ -315,6 +320,30 @@ func (a *SubstArg) String() string {
 
 //----------------------------------------------------------------------------------------------------------------------------//
 
+func Union(name string, value any) *UnionArg {
+	return &UnionArg{
+		name:  name,
+		value: value,
+	}
+}
+
+func (a *UnionArg) Name() string {
+	return a.name
+}
+
+func (a *UnionArg) Value() any {
+	return a.value
+}
+
+func (a *UnionArg) SetValue(v any) {
+	a.value = v
+}
+
+func (a *UnionArg) String() string {
+	return fmt.Sprintf("{UnionArg(%s)=`%v`}", a.name, a.value)
+}
+
+// ----------------------------------------------------------------------------------------------------------------------------//
 // Проверка валидности Config
 func (x *Config) Check(cfg any) (err error) {
 	knownCfg = x
@@ -1000,7 +1029,10 @@ func (db *DB) prepareQuery(queryName string, tp PatternType, vars []any) (prepar
 //----------------------------------------------------------------------------------------------------------------------------//
 
 func doSubst(q string, tp PatternType, vars []any) (newQ string, before string, after string, newVars []any, err error) {
-	newQ = q
+	newQ, err = PrepareUnion(q, vars)
+	if err != nil {
+		return
+	}
 
 	defer func() {
 		for name, val := range cleanupPatterns {
@@ -1019,6 +1051,9 @@ func doSubst(q string, tp PatternType, vars []any) (newQ string, before string, 
 		switch v := v.(type) {
 		default:
 			newVars = append(newVars, v)
+
+		case *UnionArg:
+			// skip
 
 		case *SubstArg:
 			if v == nil {

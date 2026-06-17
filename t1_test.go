@@ -2,12 +2,14 @@ package db
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"reflect"
 	"regexp"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/alrusov/misc"
 )
@@ -321,6 +323,37 @@ func TestJbPairs2String(t *testing.T) {
 	s = jbp.String(PatternTypeUpdate)
 	if !equal(s, expected) {
 		t.Errorf("%d.update: got\n%s\nexpected\n%s\n", maxFuncPairsCount, s, expected)
+	}
+}
+
+//----------------------------------------------------------------------------------------------------------------------------//
+
+func TestUnion(t *testing.T) {
+	ts := time.Now().UTC()
+	vars := []any{
+		sql.Named("from", ts),
+		sql.Named("to", ts.Add(time.Hour)),
+		sql.Named("limit", 100),
+		sql.Named("offset", 0),
+		Subst("IDS", []uint64{1, 2, 3, 4, 5}),
+	}
+
+	q := `	SELECT * FROM (
+				@@UNION (@id@) IN (@IDS@) {
+					SELECT *
+					FROM tbl
+					WHERE id=@id@
+						AND time BETWEEN @from AND @to
+					ORDER BY time
+					LIMIT @limit OFFSET @offset
+				}
+			)
+			ORDER BY id, time`
+
+	q, err := PrepareUnion(q, vars)
+	if err != nil {
+		t.Fatal(err)
+		return // formally
 	}
 }
 
